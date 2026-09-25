@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Settings, Database, Bell, Search, LogOut, FileText, Bot, MessageSquare, BarChart3, User, Menu } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -6,6 +7,7 @@ export default function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const navigation = [
     { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
@@ -24,8 +26,16 @@ export default function MainLayout() {
 
   return (
     <div className="min-h-screen bg-background flex">
+      {/* Mobile sidebar backdrop */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 z-20 bg-slate-900/50 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-64 bg-slate-850 text-slate-300 flex flex-col flex-shrink-0 border-r border-slate-800">
+      <div className={`fixed inset-y-0 left-0 z-30 w-64 bg-slate-850 text-slate-300 flex flex-col transform transition-transform duration-300 lg:static lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} border-r border-slate-800`}>
         <div className="h-16 flex items-center px-6 border-b border-slate-800 bg-slate-900/50">
           <Database className="w-6 h-6 text-primary-500 mr-3" />
           <span className="font-semibold text-white tracking-wide">Enterprise KI</span>
@@ -53,11 +63,17 @@ export default function MainLayout() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden lg:pl-0">
         {/* Header */}
-        <header className="h-16 bg-surface border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0">
-          <div className="flex-1 flex">
-            <div className="w-full max-w-lg relative">
+        <header className="h-16 bg-surface border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 flex-shrink-0">
+          <div className="flex-1 flex items-center">
+            <button 
+              className="mr-4 lg:hidden p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+            <div className="w-full max-w-lg relative hidden sm:block">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-slate-400" />
               </div>
