@@ -11,6 +11,7 @@ export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [department, setDepartment] = useState('');
   const [localError, setLocalError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -20,7 +21,7 @@ export default function Register() {
     setIsSubmitting(true);
     
     try {
-      await register({ name, email, password });
+      await register({ name, email, password, department });
       navigate('/dashboard');
     } catch (err) {
       setLocalError(err.response?.data?.message || 'Failed to register. Please try again.');
@@ -90,6 +91,21 @@ export default function Register() {
             placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label htmlFor="department" className="block text-sm font-medium text-slate-700 mb-1">
+            Department
+          </label>
+          <Input
+            id="department"
+            name="department"
+            type="text"
+            required
+            placeholder="e.g. Engineering, Sales, HR"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
           />
         </div>
 
