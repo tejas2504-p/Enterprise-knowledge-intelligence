@@ -1,8 +1,11 @@
-import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, Settings, Database, Bell, Search } from 'lucide-react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Users, Settings, Database, Bell, Search, LogOut } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export default function MainLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -10,6 +13,11 @@ export default function MainLayout() {
     { name: 'Team', href: '/team', icon: Users },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -39,14 +47,23 @@ export default function MainLayout() {
           })}
         </nav>
         <div className="p-4 border-t border-slate-800">
-          <div className="flex items-center">
-            <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-sm font-medium text-white">
-              JD
+          <div className="flex items-center justify-between">
+            <div className="flex items-center truncate">
+              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-sm font-medium text-white uppercase flex-shrink-0">
+                {user?.name?.charAt(0) || 'U'}
+              </div>
+              <div className="ml-3 truncate">
+                <p className="text-sm font-medium text-white truncate">{user?.name || 'User'}</p>
+                <p className="text-xs text-slate-400 capitalize">{user?.role || 'user'}</p>
+              </div>
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-white">John Doe</p>
-              <p className="text-xs text-slate-400">Admin</p>
-            </div>
+            <button 
+              onClick={handleLogout}
+              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-md transition-colors"
+              title="Logout"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>

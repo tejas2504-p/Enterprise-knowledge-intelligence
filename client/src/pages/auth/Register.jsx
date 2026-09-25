@@ -1,23 +1,32 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
+import { useAuth } from '../../../context/AuthContext';
+import { Button } from '../../ui/Button';
+import { Input } from '../../ui/Input';
 
 export default function Register() {
   const navigate = useNavigate();
+  const { register } = useAuth();
+  
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [localError, setLocalError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
-    // Simulate registration
-    setTimeout(() => {
-      setIsLoading(false);
+    setLocalError(null);
+    setIsSubmitting(true);
+    
+    try {
+      await register({ name, email, password });
       navigate('/dashboard');
-    }, 800);
+    } catch (err) {
+      setLocalError(err.response?.data?.message || 'Failed to register. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -28,6 +37,12 @@ export default function Register() {
           Get started with your enterprise workspace.
         </p>
       </div>
+
+      {localError && (
+        <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-md border border-red-100">
+          {localError}
+        </div>
+      )}
 
       <form className="space-y-4" onSubmit={handleSubmit}>
         <div>
@@ -71,14 +86,15 @@ export default function Register() {
             type="password"
             autoComplete="new-password"
             required
+            minLength={8}
             placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
 
-        <Button type="submit" className="w-full mt-2" disabled={isLoading}>
-          {isLoading ? 'Creating account...' : 'Create account'}
+        <Button type="submit" className="w-full mt-2" disabled={isSubmitting}>
+          {isSubmitting ? 'Creating account...' : 'Create account'}
         </Button>
       </form>
 

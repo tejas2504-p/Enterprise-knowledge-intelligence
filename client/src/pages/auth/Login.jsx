@@ -1,22 +1,32 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
+import { useAuth } from '../../../context/AuthContext';
+import { Button } from '../../ui/Button';
+import { Input } from '../../ui/Input';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { login } = useAuth();
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [localError, setLocalError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
-    // Simulate login
-    setTimeout(() => {
-      setIsLoading(false);
+    setLocalError(null);
+    setIsSubmitting(true);
+    
+    try {
+      await login(email, password);
+      // PublicRoute will auto-redirect, but we can also manually navigate
       navigate('/dashboard');
-    }, 800);
+    } catch (err) {
+      setLocalError(err.response?.data?.message || 'Failed to login. Please check your credentials.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -27,6 +37,12 @@ export default function Login() {
           Enter your details to access the platform.
         </p>
       </div>
+
+      {localError && (
+        <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-md border border-red-100">
+          {localError}
+        </div>
+      )}
 
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div>
@@ -66,8 +82,8 @@ export default function Login() {
           />
         </div>
 
-        <Button type="submit" className="w-full" disabled={isLoading}>
-          {isLoading ? 'Signing in...' : 'Sign in'}
+        <Button type="submit" className="w-full" disabled={isSubmitting}>
+          {isSubmitting ? 'Signing in...' : 'Sign in'}
         </Button>
       </form>
 
