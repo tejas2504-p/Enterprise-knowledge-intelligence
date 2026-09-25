@@ -33,7 +33,10 @@ export default function AppRouter() {
         <Route element={<MainLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/knowledge" element={<div className="p-4">Knowledge Base Placeholder</div>} />
-          <Route path="/team" element={<div className="p-4">Team Placeholder</div>} />
+          <Route path="/documents" element={<div className="p-4">Documents Placeholder</div>} />
+          <Route path="/assistant" element={<div className="p-4">AI Assistant Placeholder</div>} />
+          <Route path="/conversations" element={<div className="p-4">Conversations Placeholder</div>} />
+          <Route path="/analytics" element={<div className="p-4">Analytics Placeholder</div>} />
           <Route path="/settings" element={<div className="p-4">Settings Placeholder</div>} />
         </Route>
       </Route>
