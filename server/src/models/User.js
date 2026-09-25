@@ -50,10 +50,9 @@ const userSchema = new mongoose.Schema(
       enum: ['user', 'admin'],
       default: 'user',
     },
-    // Logical grouping for users within an Organization. Set as an ObjectId to prepare for the future Department entity.
+    // Logical grouping for users within an Organization.
     department: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Department',
+      type: String,
       default: null,
       index: true, // Speeds up queries fetching all users in a department
     },
