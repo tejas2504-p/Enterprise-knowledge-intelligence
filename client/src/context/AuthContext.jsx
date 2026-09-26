@@ -1,5 +1,5 @@
 import { createContext, useState, useEffect, useContext } from 'react';
-import api from '../services/api';
+import { authService } from '../services/authService';
 
 const AuthContext = createContext();
 
@@ -14,7 +14,7 @@ export const AuthProvider = ({ children }) => {
     // Check if user is logged in on mount
     const fetchUser = async () => {
       try {
-        const { data } = await api.get('/auth/me');
+        const data = await authService.getCurrentUser();
         setUser(data);
       } catch (err) {
         setUser(null);
@@ -23,13 +23,24 @@ export const AuthProvider = ({ children }) => {
       }
     };
     fetchUser();
+    
+    // Handle unauthorized events emitted by API interceptor
+    const handleUnauthorized = () => {
+      setUser(null);
+    };
+    
+    document.addEventListener('unauthorized', handleUnauthorized);
+    
+    return () => {
+      document.removeEventListener('unauthorized', handleUnauthorized);
+    };
   }, []);
 
   const login = async (email, password) => {
     setIsLoading(true);
     setError(null);
     try {
-      const { data } = await api.post('/auth/login', { email, password });
+      const data = await authService.login(email, password);
       setUser(data);
       return data;
     } catch (err) {
@@ -44,7 +55,7 @@ export const AuthProvider = ({ children }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const { data } = await api.post('/auth/register', userData);
+      const data = await authService.register(userData);
       setUser(data);
       return data;
     } catch (err) {
@@ -56,11 +67,14 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    setIsLoading(true);
     try {
-      await api.post('/auth/logout');
+      await authService.logout();
       setUser(null);
     } catch (err) {
       console.error('Logout error', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -70,3 +84,4 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+
