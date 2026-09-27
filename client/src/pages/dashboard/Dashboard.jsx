@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { FileText, Database, Activity, Bot, ArrowUpRight, Clock, MoreVertical, File } from 'lucide-react';
+import { FileText, Database, Activity, Bot, Clock, MoreVertical, File } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function Dashboard() {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Settings, Database, Bell, Search, LogOut, FileText, Bot, MessageSquare, BarChart3, User, Menu } from 'lucide-react';
+import { LayoutDashboard, Settings, Database, Bell, Search, LogOut, FileText, Bot, MessageSquare, BarChart3, Menu } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function MainLayout() {
