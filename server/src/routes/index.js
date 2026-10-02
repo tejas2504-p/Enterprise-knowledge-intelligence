@@ -1,9 +1,13 @@
 import express from 'express';
 import authRoutes from './authRoutes.js';
+import kbRoutes from './kbRoutes.js';
+import docRoutes from './docRoutes.js';
 
 const router = express.Router();
 
 router.use('/auth', authRoutes);
+router.use('/kbs', kbRoutes);
+router.use('/documents', docRoutes);
 
 // Health Check Endpoint
 router.get('/health', (req, res) => {
