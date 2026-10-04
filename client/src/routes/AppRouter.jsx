@@ -13,6 +13,8 @@ import Login from '../pages/auth/Login';
 import Register from '../pages/auth/Register';
 import Dashboard from '../pages/dashboard/Dashboard';
 import NotFound from '../pages/NotFound';
+import KnowledgeBases from '../pages/knowledge/KnowledgeBases';
+import KnowledgeBaseDetail from '../pages/knowledge/KnowledgeBaseDetail';
 
 export default function AppRouter() {
   return (
@@ -32,7 +34,8 @@ export default function AppRouter() {
       <Route element={<ProtectedRoute />}>
         <Route element={<MainLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/knowledge" element={<div className="p-4">Knowledge Base Placeholder</div>} />
+          <Route path="/knowledge" element={<KnowledgeBases />} />
+          <Route path="/knowledge/:id" element={<KnowledgeBaseDetail />} />
           <Route path="/documents" element={<div className="p-4">Documents Placeholder</div>} />
           <Route path="/assistant" element={<div className="p-4">AI Assistant Placeholder</div>} />
           <Route path="/conversations" element={<div className="p-4">Conversations Placeholder</div>} />
