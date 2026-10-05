@@ -6,7 +6,7 @@ import docRoutes from './docRoutes.js';
 const router = express.Router();
 
 router.use('/auth', authRoutes);
-router.use('/kbs', kbRoutes);
+router.use('/knowledge-bases', kbRoutes);
 router.use('/documents', docRoutes);
 
 // Health Check Endpoint

@@ -13,7 +13,7 @@ router.route('/')
 
 router.route('/:id')
   .get(getKB)
-  .put(updateKB)
+  .patch(updateKB)
   .delete(deleteKB);
 
 export default router;
