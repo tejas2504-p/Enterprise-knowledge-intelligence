@@ -11,7 +11,7 @@ export default function MainLayout() {
 
   const navigation = [
     { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Knowledge Base', href: '/knowledge', icon: Database },
+    { name: 'Knowledge Base', href: '/knowledge-bases', icon: Database },
     { name: 'Documents', href: '/documents', icon: FileText },
     { name: 'AI Assistant', href: '/assistant', icon: Bot },
     { name: 'Conversations', href: '/conversations', icon: MessageSquare },
