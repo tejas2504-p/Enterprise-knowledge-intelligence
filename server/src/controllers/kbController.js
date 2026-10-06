@@ -129,7 +129,7 @@ export const deleteKB = async (req, res, next) => {
     }
 
     // Also delete all documents associated with this KB
-    await Document.deleteMany({ knowledgeBaseId: kb._id });
+    await Document.deleteMany({ knowledgeBase: kb._id });
     
     await kb.deleteOne();
 
