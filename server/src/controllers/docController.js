@@ -41,24 +41,30 @@ export const uploadDocument = async (req, res, next) => {
       throw new Error('Please upload a file');
     }
 
-    // Check if KB exists and belongs to user
-    const kb = await KnowledgeBase.findOne({ _id: kbId, owner: req.user._id });
+    // Check if KB exists and belongs to user or accessible
+    const kb = await KnowledgeBase.findById(kbId);
     if (!kb) {
       // Clean up uploaded file
       fs.unlinkSync(req.file.path);
       res.status(404);
-      throw new Error('Knowledge Base not found or you do not have permission');
+      throw new Error('Knowledge Base not found');
+    }
+
+    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+      fs.unlinkSync(req.file.path);
+      res.status(403);
+      throw new Error('Not authorized to access this Knowledge Base');
     }
 
     const doc = await Document.create({
       title: req.body.title || req.file.originalname,
-      originalName: req.file.originalname,
+      originalFileName: req.file.originalname,
       mimeType: req.file.mimetype,
-      size: req.file.size,
-      knowledgeBaseId: kb._id,
+      fileSize: req.file.size,
+      knowledgeBase: kb._id,
       uploadedBy: req.user._id,
-      status: 'pending', // Will be picked up by the processing pipeline later
-      filePath: req.file.path,
+      processingStatus: 'uploaded',
+      url: req.file.path,
     });
 
     res.status(201).json({
@@ -76,19 +82,24 @@ export const uploadDocument = async (req, res, next) => {
 };
 
 // @desc    Get documents for a KB
-// @route   GET /api/documents/kb/:kbId
+// @route   GET /api/knowledge-bases/:knowledgeBaseId/documents
 // @access  Private
-export const getDocuments = async (req, res, next) => {
+export const getDocumentsByKB = async (req, res, next) => {
   try {
-    const { kbId } = req.params;
+    const { knowledgeBaseId } = req.params;
 
-    const kb = await KnowledgeBase.findOne({ _id: kbId, owner: req.user._id });
+    const kb = await KnowledgeBase.findById(knowledgeBaseId);
     if (!kb) {
       res.status(404);
       throw new Error('Knowledge Base not found');
     }
 
-    const docs = await Document.find({ knowledgeBaseId: kbId }).sort('-createdAt');
+    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+      res.status(403);
+      throw new Error('Not authorized to access this Knowledge Base');
+    }
+
+    const docs = await Document.find({ knowledgeBase: knowledgeBaseId }).sort('-createdAt');
 
     res.status(200).json({
       status: 'success',
@@ -105,11 +116,22 @@ export const getDocuments = async (req, res, next) => {
 // @access  Private
 export const getDocument = async (req, res, next) => {
   try {
-    const doc = await Document.findOne({ _id: req.params.id, uploadedBy: req.user._id });
+    const doc = await Document.findById(req.params.id);
 
     if (!doc) {
       res.status(404);
       throw new Error('Document not found');
+    }
+
+    const kb = await KnowledgeBase.findById(doc.knowledgeBase);
+    if (!kb) {
+       res.status(404);
+       throw new Error('Associated Knowledge Base not found');
+    }
+
+    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+      res.status(403);
+      throw new Error('Not authorized to access this Document');
     }
 
     res.status(200).json({
@@ -126,16 +148,28 @@ export const getDocument = async (req, res, next) => {
 // @access  Private
 export const deleteDocument = async (req, res, next) => {
   try {
-    const doc = await Document.findOne({ _id: req.params.id, uploadedBy: req.user._id });
+    const doc = await Document.findById(req.params.id);
 
     if (!doc) {
       res.status(404);
       throw new Error('Document not found');
     }
 
-    // Remove file from filesystem
-    if (fs.existsSync(doc.filePath)) {
-      fs.unlinkSync(doc.filePath);
+    const kb = await KnowledgeBase.findById(doc.knowledgeBase);
+    
+    // Only allow deletion if user owns the document or the KB
+    if (doc.uploadedBy.toString() !== req.user._id.toString() && (!kb || kb.owner.toString() !== req.user._id.toString())) {
+      res.status(403);
+      throw new Error('Not authorized to delete this Document');
+    }
+
+    // Remove file from filesystem if it's a local file
+    if (doc.url && fs.existsSync(doc.url)) {
+      try {
+        fs.unlinkSync(doc.url);
+      } catch (e) {
+        console.error('Error deleting file:', e);
+      }
     }
 
     await doc.deleteOne();
