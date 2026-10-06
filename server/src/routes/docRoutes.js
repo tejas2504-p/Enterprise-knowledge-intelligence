@@ -1,5 +1,5 @@
 import express from 'express';
-import { uploadDocument, upload, getDocuments, getDocument, deleteDocument } from '../controllers/docController.js';
+import { uploadDocument, upload, getDocument, deleteDocument } from '../controllers/docController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -8,7 +8,6 @@ const router = express.Router();
 router.use(protect);
 
 router.post('/upload', upload.single('file'), uploadDocument);
-router.get('/kb/:kbId', getDocuments);
 
 router.route('/:id')
   .get(getDocument)
