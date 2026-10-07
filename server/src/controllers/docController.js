@@ -4,6 +4,8 @@ import KnowledgeBase from '../models/KnowledgeBase.js';
 import Document from '../models/Document.js';
 import { storageProvider } from '../services/storageProvider.js';
 
+import { documentProcessingService } from '../services/documentProcessingService.js';
+
 // @desc    Upload document to a KB
 // @route   POST /api/knowledge-bases/:knowledgeBaseId/documents
 // @access  Private
@@ -76,6 +78,11 @@ export const uploadDocument = async (req, res, next) => {
       kb.documentCount += 1;
       kb.totalSize += req.file.size;
       await kb.save();
+
+      // Trigger asynchronous text extraction processing (Phase 2)
+      documentProcessingService.processDocument(doc._id).catch(err => {
+        console.error('Background processing error:', err);
+      });
 
       res.status(201).json({
         status: 'success',
