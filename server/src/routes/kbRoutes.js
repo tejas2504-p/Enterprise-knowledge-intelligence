@@ -1,7 +1,8 @@
 import express from 'express';
 import { createKB, getKBs, getKB, updateKB, deleteKB } from '../controllers/kbController.js';
-import { getDocumentsByKB } from '../controllers/docController.js';
+import { getDocumentsByKB, uploadDocument } from '../controllers/docController.js';
 import { protect } from '../middleware/authMiddleware.js';
+import { upload } from '../middleware/uploadMiddleware.js';
 
 const router = express.Router();
 
@@ -17,6 +18,8 @@ router.route('/:id')
   .patch(updateKB)
   .delete(deleteKB);
 
-router.get('/:knowledgeBaseId/documents', getDocumentsByKB);
+router.route('/:knowledgeBaseId/documents')
+  .get(getDocumentsByKB)
+  .post(upload.single('file'), uploadDocument);
 
 export default router;

@@ -1,37 +1,17 @@
 import fs from 'fs';
 import path from 'path';
-import multer from 'multer';
 import KnowledgeBase from '../models/KnowledgeBase.js';
 import Document from '../models/Document.js';
-
-// Setup multer storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(process.cwd(), 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
-  }
-});
-
-export const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
-});
+import { storageProvider } from '../services/storageProvider.js';
 
 // @desc    Upload document to a KB
-// @route   POST /api/documents/upload
+// @route   POST /api/knowledge-bases/:knowledgeBaseId/documents
 // @access  Private
 export const uploadDocument = async (req, res, next) => {
   try {
-    const { kbId } = req.body;
+    const { knowledgeBaseId } = req.params;
     
-    if (!kbId) {
+    if (!knowledgeBaseId) {
       res.status(400);
       throw new Error('Knowledge Base ID is required');
     }
@@ -42,37 +22,73 @@ export const uploadDocument = async (req, res, next) => {
     }
 
     // Check if KB exists and belongs to user or accessible
-    const kb = await KnowledgeBase.findById(kbId);
+    const kb = await KnowledgeBase.findById(knowledgeBaseId);
     if (!kb) {
-      // Clean up uploaded file
-      fs.unlinkSync(req.file.path);
+      // Clean up uploaded temp file
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       res.status(404);
       throw new Error('Knowledge Base not found');
     }
 
     if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
-      fs.unlinkSync(req.file.path);
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
       res.status(403);
       throw new Error('Not authorized to access this Knowledge Base');
     }
 
-    const doc = await Document.create({
-      title: req.body.title || req.file.originalname,
-      originalFileName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      fileSize: req.file.size,
-      knowledgeBase: kb._id,
-      uploadedBy: req.user._id,
-      processingStatus: 'uploaded',
-      url: req.file.path,
-    });
+    // Process storage using modular provider
+    let fileInfo;
+    try {
+      fileInfo = await storageProvider.uploadFile(
+        req.file.path, // Temp file path
+        req.file.originalname,
+        req.file.mimetype
+      );
+    } catch (storageError) {
+      if (fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      res.status(500);
+      throw new Error('Failed to store file: ' + storageError.message);
+    }
 
-    res.status(201).json({
-      status: 'success',
-      data: doc,
-    });
+    try {
+      // Create Document record
+      const doc = await Document.create({
+        title: req.body.title || req.file.originalname,
+        originalFileName: req.file.originalname,
+        fileType: path.extname(req.file.originalname).toLowerCase().replace('.', ''),
+        mimeType: req.file.mimetype,
+        fileSize: req.file.size,
+        storageProvider: fileInfo.provider,
+        storageKey: fileInfo.storageKey,
+        url: fileInfo.url,
+        knowledgeBase: kb._id,
+        uploadedBy: req.user._id,
+        processingStatus: 'uploaded',
+      });
+
+      // Update Knowledge Base stats
+      kb.documentCount += 1;
+      kb.totalSize += req.file.size;
+      await kb.save();
+
+      res.status(201).json({
+        status: 'success',
+        data: doc,
+      });
+    } catch (dbError) {
+      // Clean up file if database creation fails
+      await storageProvider.deleteFile(fileInfo.storageKey);
+      res.status(500);
+      throw new Error('Failed to save document metadata: ' + dbError.message);
+    }
   } catch (error) {
-    if (req.file) {
+    if (req.file && fs.existsSync(req.file.path)) {
       try {
         fs.unlinkSync(req.file.path);
       } catch(e) {}
@@ -163,8 +179,10 @@ export const deleteDocument = async (req, res, next) => {
       throw new Error('Not authorized to delete this Document');
     }
 
-    // Remove file from filesystem if it's a local file
-    if (doc.url && fs.existsSync(doc.url)) {
+    // Remove file from storage provider
+    if (doc.storageKey) {
+      await storageProvider.deleteFile(doc.storageKey);
+    } else if (doc.url && fs.existsSync(doc.url)) { // Fallback for old local files if any
       try {
         fs.unlinkSync(doc.url);
       } catch (e) {
@@ -173,6 +191,12 @@ export const deleteDocument = async (req, res, next) => {
     }
 
     await doc.deleteOne();
+
+    if (kb) {
+      kb.documentCount = Math.max(0, kb.documentCount - 1);
+      kb.totalSize = Math.max(0, kb.totalSize - doc.fileSize);
+      await kb.save();
+    }
 
     res.status(200).json({
       status: 'success',
