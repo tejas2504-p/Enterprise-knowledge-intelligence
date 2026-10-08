@@ -122,7 +122,7 @@ export const getDocumentsByKB = async (req, res, next) => {
       throw new Error('Not authorized to access this Knowledge Base');
     }
 
-    const docs = await Document.find({ knowledgeBase: knowledgeBaseId }).sort('-createdAt');
+    const docs = await Document.find({ knowledgeBase: knowledgeBaseId }).sort('-createdAt').populate('uploadedBy', 'name email');
 
     res.status(200).json({
       status: 'success',
@@ -139,7 +139,7 @@ export const getDocumentsByKB = async (req, res, next) => {
 // @access  Private
 export const getDocument = async (req, res, next) => {
   try {
-    const doc = await Document.findById(req.params.id);
+    const doc = await Document.findById(req.params.id).populate('uploadedBy', 'name email');
 
     if (!doc) {
       res.status(404);
