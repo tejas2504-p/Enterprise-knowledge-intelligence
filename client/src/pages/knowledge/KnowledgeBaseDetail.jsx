@@ -54,15 +54,22 @@ export default function KnowledgeBaseDetail() {
   const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
     
+    const validFiles = Array.from(files).filter(file => file.size <= 50 * 1024 * 1024);
+    if (validFiles.length !== files.length) {
+      alert('Some files exceed the 50MB size limit and will not be uploaded.');
+    }
+    
+    if (validFiles.length === 0) return;
+    
     setUploading(true);
     let successCount = 0;
     
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < validFiles.length; i++) {
       try {
-        await uploadDocument(id, files[i]);
+        await uploadDocument(id, validFiles[i]);
         successCount++;
       } catch (err) {
-        console.error('Upload failed for file', files[i].name, err);
+        console.error('Upload failed for file', validFiles[i].name, err);
       }
     }
     
@@ -71,8 +78,8 @@ export default function KnowledgeBaseDetail() {
       fileInputRef.current.value = '';
     }
     
-    if (successCount < files.length) {
-      alert(`Uploaded ${successCount} out of ${files.length} files successfully.`);
+    if (successCount < validFiles.length) {
+      alert(`Uploaded ${successCount} out of ${validFiles.length} files successfully.`);
     }
     
     fetchData(); // Refresh documents
