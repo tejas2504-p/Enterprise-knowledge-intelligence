@@ -2,16 +2,14 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
-
-load_dotenv()
+from app.core.config import settings
+from app.api.routes import router as internal_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Connect to MongoDB
-    mongodb_uri = os.getenv("MONGODB_URI")
-    if mongodb_uri:
-        app.mongodb_client = AsyncIOMotorClient(mongodb_uri)
+    if settings.MONGODB_URI:
+        app.mongodb_client = AsyncIOMotorClient(settings.MONGODB_URI)
         app.mongodb = app.mongodb_client.get_database("enterprise_knowledge")
         print("Connected to MongoDB!")
     else:
@@ -38,3 +36,5 @@ async def health_check():
         except Exception:
             pass
     return {"status": "ok", "database": db_status}
+
+app.include_router(internal_router, prefix="/api/internal", tags=["internal"])
