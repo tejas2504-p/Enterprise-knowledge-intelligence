@@ -2,3 +2,10 @@ fastapi
 uvicorn
 motor
 python-dotenv
+qdrant-client
+pydantic
+pydantic-settings
+langchain-text-splitters
+openai
+pytest
+httpx
