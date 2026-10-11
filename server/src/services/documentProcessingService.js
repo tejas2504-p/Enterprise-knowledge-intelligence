@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import Document from '../models/Document.js';
-import pdfParse from 'pdf-parse';
+import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import { indexDocumentInAI } from './aiServiceClient.js';
 
@@ -36,9 +36,14 @@ class DocumentProcessingService {
       // Extract text based on file type
       if (mimeType === 'application/pdf' || fileExtension === '.pdf') {
         const fileBuffer = await fs.readFile(filePath);
-        const data = await pdfParse(fileBuffer);
-        extractedText = data.text;
-        pageCount = data.numpages;
+        const parser = new PDFParse({ data: fileBuffer });
+        try {
+          const data = await parser.getText();
+          extractedText = data.text;
+          pageCount = data.total;
+        } finally {
+          await parser.destroy();
+        }
       } else if (
         mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
         fileExtension === '.docx'
