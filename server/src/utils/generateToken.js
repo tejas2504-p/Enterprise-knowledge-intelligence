@@ -11,12 +11,16 @@ const generateToken = (res, userId) => {
   });
 
   // Set JWT as HTTP-Only cookie
-  res.cookie('jwt', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Use 'none' and 'secure' in production if cross-site
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-  });
+  if (res && typeof res.cookie === 'function') {
+    res.cookie('jwt', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Use 'none' and 'secure' in production if cross-site
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    });
+  }
+
+  return token;
 };
 
 export default generateToken;
