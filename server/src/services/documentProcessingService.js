@@ -3,6 +3,7 @@ import path from 'path';
 import Document from '../models/Document.js';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+import { indexDocumentInAI } from './aiServiceClient.js';
 
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
@@ -72,6 +73,10 @@ class DocumentProcessingService {
       document.processingError = null;
 
       await document.save();
+      
+      // Call AI Service to chunk and embed the text
+      await indexDocumentInAI(document);
+      
       return document;
     } catch (error) {
       console.error(`Error processing document ${documentId}:`, error);

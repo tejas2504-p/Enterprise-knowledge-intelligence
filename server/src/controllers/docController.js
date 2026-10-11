@@ -3,8 +3,8 @@ import path from 'path';
 import KnowledgeBase from '../models/KnowledgeBase.js';
 import Document from '../models/Document.js';
 import { storageProvider } from '../services/storageProvider.js';
-
 import { documentProcessingService } from '../services/documentProcessingService.js';
+import { deleteDocumentFromAI } from '../services/aiServiceClient.js';
 
 // @desc    Upload document to a KB
 // @route   POST /api/knowledge-bases/:knowledgeBaseId/documents
@@ -195,6 +195,13 @@ export const deleteDocument = async (req, res, next) => {
       } catch (e) {
         console.error('Error deleting file:', e);
       }
+    }
+
+    // Remove from AI Service / Vector DB
+    try {
+      await deleteDocumentFromAI(doc._id.toString());
+    } catch (e) {
+      console.error('Failed to delete document from AI service:', e);
     }
 
     await doc.deleteOne();

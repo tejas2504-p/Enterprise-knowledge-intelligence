@@ -1,5 +1,6 @@
 import KnowledgeBase from '../models/KnowledgeBase.js';
 import Document from '../models/Document.js';
+import { deleteKnowledgeBaseFromAI } from '../services/aiServiceClient.js';
 
 // @desc    Create a new knowledge base
 // @route   POST /api/knowledge-bases
@@ -130,6 +131,13 @@ export const deleteKB = async (req, res, next) => {
 
     // Also delete all documents associated with this KB
     await Document.deleteMany({ knowledgeBase: kb._id });
+    
+    // Remove from AI Service / Vector DB
+    try {
+      await deleteKnowledgeBaseFromAI(kb._id.toString());
+    } catch (e) {
+      console.error('Failed to delete knowledge base from AI service:', e);
+    }
     
     await kb.deleteOne();
 
