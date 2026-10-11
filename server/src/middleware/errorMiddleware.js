@@ -14,8 +14,15 @@ export const errorHandler = (err, req, res, next) => {
     statusCode = 404;
   }
 
+  // Check for Mongoose ValidationError
+  if (err.name === 'ValidationError') {
+    message = Object.values(err.errors).map((val) => val.message).join(', ');
+    statusCode = 400;
+  }
+
   res.status(statusCode).json({
+    status: statusCode >= 500 ? 'error' : 'fail',
     message,
-    stack: process.env.NODE_ENV === 'production' ? '🥞' : err.stack,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
   });
 };
