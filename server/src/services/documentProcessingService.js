@@ -14,7 +14,7 @@ class DocumentProcessingService {
    */
   async processDocument(documentId) {
     try {
-      const document = await Document.findById(documentId);
+      const document = await Document.findById(documentId).populate('knowledgeBase');
       if (!document) {
         throw new Error(`Document with ID ${documentId} not found`);
       }
@@ -60,8 +60,12 @@ class DocumentProcessingService {
         throw new Error('Unsupported file format for text extraction');
       }
 
-      // Normalize whitespace
-      extractedText = extractedText.replace(/\s+/g, ' ').trim();
+      // Normalize horizontal whitespace and excessive blank lines while preserving paragraph and line breaks
+      extractedText = extractedText
+        .replace(/[^\S\r\n\f]+/g, ' ')
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 
       // Calculate counts
       const wordCount = extractedText.length > 0 ? extractedText.split(/\s+/).length : 0;

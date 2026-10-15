@@ -16,11 +16,22 @@ const aiClient = axios.create({
 
 export const indexDocumentInAI = async (document) => {
   try {
+    const kbId = document.knowledgeBase?._id
+      ? document.knowledgeBase._id.toString()
+      : document.knowledgeBase?.toString();
+    const department = document.department || document.knowledgeBase?.department || null;
+    const organizationId = document.organization || document.knowledgeBase?.organization || null;
+
     const response = await aiClient.post('/documents/index', {
       document_id: document._id.toString(),
-      knowledge_base_id: document.knowledgeBase.toString(),
+      knowledge_base_id: kbId,
       title: document.title,
       text: document.extractedText,
+      filename: document.originalFileName || null,
+      department: department,
+      organization_id: organizationId,
+      page_count: document.pageCount || null,
+      metadata: document.metadata || {},
     });
     return response.data;
   } catch (error) {
@@ -28,6 +39,34 @@ export const indexDocumentInAI = async (document) => {
     throw error;
   }
 };
+
+export const chunkDocumentInAI = async (document, options = {}) => {
+  try {
+    const kbId = document.knowledgeBase?._id
+      ? document.knowledgeBase._id.toString()
+      : document.knowledgeBase?.toString();
+    const department = document.department || document.knowledgeBase?.department || null;
+    const organizationId = document.organization || document.knowledgeBase?.organization || null;
+
+    const response = await aiClient.post('/documents/chunk', {
+      document_id: document._id.toString(),
+      knowledge_base_id: kbId,
+      title: document.title,
+      text: document.extractedText,
+      filename: document.originalFileName || null,
+      department: department,
+      organization_id: organizationId,
+      page_count: document.pageCount || null,
+      metadata: document.metadata || {},
+      ...options,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to chunk document in AI service:', error.message);
+    throw error;
+  }
+};
+
 
 export const deleteDocumentFromAI = async (documentId) => {
   try {
