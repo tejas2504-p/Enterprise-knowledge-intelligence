@@ -9,3 +9,4 @@ langchain-text-splitters
 openai
 pytest
 httpx
+tiktoken
