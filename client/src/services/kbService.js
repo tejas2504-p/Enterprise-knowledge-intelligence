@@ -5,8 +5,8 @@ export const createKnowledgeBase = async (data) => {
   return response.data;
 };
 
-export const getKnowledgeBases = async () => {
-  const response = await api.get('/knowledge-bases');
+export const getKnowledgeBases = async (params = {}) => {
+  const response = await api.get('/knowledge-bases', { params });
   return response.data;
 };
 

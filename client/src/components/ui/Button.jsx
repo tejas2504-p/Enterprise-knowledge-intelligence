@@ -9,7 +9,8 @@ const Button = React.forwardRef(({ className, variant = 'primary', size = 'defau
     secondary: 'bg-slate-100 text-slate-900 hover:bg-slate-200',
     outline: 'border border-slate-200 hover:bg-slate-100 hover:text-slate-900',
     ghost: 'hover:bg-slate-100 hover:text-slate-900',
-    danger: 'bg-red-500 text-white hover:bg-red-600 shadow-sm',
+    danger: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
+    destructive: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
   };
 
   const sizes = {
