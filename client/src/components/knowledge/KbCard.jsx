@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/Card';
 import { VisibilityBadge, StatusBadge } from '../ui/Badge';
-import { Database, FileText, User } from 'lucide-react';
+import { Database, FileText } from 'lucide-react';
 import { formatBytes, formatDate } from '../../utils/formatters';
 import KbActionsMenu from './KbActionsMenu';
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MoreVertical, ExternalLink, Settings, Trash2, Eye } from 'lucide-react';
+import { MoreVertical, Settings, Trash2, Eye } from 'lucide-react';
 
 export default function KbActionsMenu({ kb, onDelete }) {
   const [isOpen, setIsOpen] = useState(false);

@@ -1,9 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getKnowledgeBase, updateKnowledgeBase, deleteKnowledgeBase } from '../../services/kbService';
+import { 
+  getKnowledgeBase, 
+  updateKnowledgeBase, 
+  deleteKnowledgeBase 
+} from '../../services/kbService';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import { Loader2, ArrowLeft, Trash2, AlertCircle } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  Loader2, 
+  Trash2, 
+  AlertCircle, 
+  CheckCircle2, 
+  Save, 
+  Settings,
+  ShieldAlert
+} from 'lucide-react';
+import { ConfirmationDialog } from '../../components/ui/ConfirmationDialog';
+import { LoadingSpinner } from '../../components/ui/LoadingState';
 
 export default function KnowledgeBaseSettings() {
   const { id } = useParams();
@@ -14,17 +29,23 @@ export default function KnowledgeBaseSettings() {
     description: '',
     department: '',
     visibility: 'private',
-    status: 'active'
+    status: 'active',
   });
-  
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Delete modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const fetchKb = async () => {
       try {
+        setLoading(true);
+        setError(null);
         const kbData = await getKnowledgeBase(id);
         const kb = kbData.data;
         setFormData({
@@ -32,10 +53,11 @@ export default function KnowledgeBaseSettings() {
           description: kb.description || '',
           department: kb.department || '',
           visibility: kb.visibility || 'private',
-          status: kb.status || 'active'
+          status: kb.status || 'active',
         });
       } catch (err) {
-        setError('Failed to load knowledge base settings');
+        console.error('Failed to load settings', err);
+        setError(err.response?.data?.message || 'Failed to load knowledge base settings');
       } finally {
         setLoading(false);
       }
@@ -45,104 +67,171 @@ export default function KnowledgeBaseSettings() {
 
   const handleUpdate = async (e) => {
     e.preventDefault();
+    if (!formData.name.trim()) {
+      setError('Knowledge base name cannot be empty');
+      return;
+    }
+
     setSaving(true);
+    setError(null);
+    setSuccessMessage('');
+
     try {
-      await updateKnowledgeBase(id, formData);
-      navigate(`/knowledge-bases/${id}`);
+      await updateKnowledgeBase(id, {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        department: formData.department.trim() || null,
+        visibility: formData.visibility,
+        status: formData.status,
+      });
+
+      setSuccessMessage('Knowledge Base settings updated successfully.');
+      setTimeout(() => {
+        setSuccessMessage('');
+      }, 4000);
     } catch (err) {
       console.error('Update failed', err);
-      alert('Failed to update settings');
+      setError(err.response?.data?.message || 'Failed to update settings');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('Are you sure you want to delete this knowledge base? This action cannot be undone.')) {
-      return;
-    }
     setDeleting(true);
     try {
       await deleteKnowledgeBase(id);
       navigate('/knowledge-bases');
     } catch (err) {
       console.error('Delete failed', err);
-      alert('Failed to delete knowledge base');
+      alert(err.response?.data?.message || 'Failed to delete knowledge base');
       setDeleting(false);
+      setShowDeleteModal(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="flex justify-center items-center h-[50vh]">
-        <Loader2 className="animate-spin text-primary-600" size={40} />
-      </div>
-    );
+    return <LoadingSpinner message="Loading knowledge base settings..." />;
   }
 
-  if (error) {
+  if (error && !formData.name) {
     return (
-      <div className="p-8 max-w-7xl mx-auto text-center">
-        <AlertCircle className="mx-auto text-red-500 mb-4" size={48} />
-        <h2 className="text-2xl font-bold mb-4">{error}</h2>
-        <Button onClick={() => navigate('/knowledge-bases')}>Go Back</Button>
+      <div className="max-w-md mx-auto py-16 text-center space-y-4">
+        <AlertCircle size={40} className="text-red-500 mx-auto" />
+        <h2 className="text-xl font-bold text-slate-900">
+          Settings Unavailable
+        </h2>
+        <p className="text-sm text-slate-500">{error}</p>
+        <Button onClick={() => navigate('/knowledge-bases')} className="gap-2">
+          <ArrowLeft size={16} /> Return to Knowledge Bases
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
-      <Button variant="ghost" onClick={() => navigate(`/knowledge-bases/${id}`)} className="mb-6 gap-2 -ml-4">
-        <ArrowLeft size={16} /> Back to Knowledge Base
+    <div className="max-w-3xl mx-auto space-y-6">
+      {/* Back Button */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => navigate(`/knowledge-bases/${id}`)}
+        className="gap-2 -ml-2 text-slate-600 hover:text-slate-900"
+      >
+        <ArrowLeft size={16} />
+        <span>Back to Knowledge Base</span>
       </Button>
 
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900">Settings</h1>
-        <p className="text-slate-500 mt-2">Manage settings for this knowledge base.</p>
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
+          <Settings size={28} className="text-slate-700" />
+          <span>Knowledge Base Settings</span>
+        </h1>
+        <p className="text-sm text-slate-500 mt-1">
+          Configure collection details, accessibility scope, lifecycle status, or delete the collection.
+        </p>
       </div>
 
-      <Card className="mb-8">
+      {/* Feedback Alerts */}
+      {successMessage && (
+        <div className="flex items-center gap-2.5 p-3.5 bg-emerald-50 text-emerald-800 rounded-xl border border-emerald-200 text-xs">
+          <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+          <span>{successMessage}</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2.5 p-3.5 bg-red-50 text-red-800 rounded-xl border border-red-200 text-xs">
+          <AlertCircle size={16} className="text-red-600 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Settings Form Card */}
+      <Card className="border-slate-200 shadow-soft bg-white">
         <form onSubmit={handleUpdate}>
-          <CardHeader>
-            <CardTitle>General Information</CardTitle>
-            <CardDescription>Update name, description, and visibility.</CardDescription>
+          <CardHeader className="border-b border-slate-100 pb-5">
+            <CardTitle className="text-base font-semibold text-slate-900">
+              General Configuration
+            </CardTitle>
+            <CardDescription className="text-xs text-slate-500">
+              Update name, description, visibility, and active status.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Name</label>
+
+          <CardContent className="p-6 space-y-5">
+            {/* Name */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 flex justify-between">
+                <span>Knowledge Base Name <span className="text-red-500">*</span></span>
+                <span className="text-slate-400 font-normal normal-case">{formData.name.length}/100</span>
+              </label>
               <input
                 type="text"
                 required
-                className="w-full border-slate-200 rounded-md p-2 border focus:ring-2 focus:ring-primary-500 focus:outline-none"
+                maxLength={100}
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:ring-2 focus:ring-primary-500 focus:outline-none transition-all"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               />
             </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Description</label>
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 flex justify-between">
+                <span>Description</span>
+                <span className="text-slate-400 font-normal normal-case">{formData.description.length}/500</span>
+              </label>
               <textarea
-                className="w-full border-slate-200 rounded-md p-2 border focus:ring-2 focus:ring-primary-500 focus:outline-none min-h-[100px]"
+                maxLength={500}
+                className="w-full text-sm border border-slate-200 rounded-lg p-3 bg-white focus:ring-2 focus:ring-primary-500 focus:outline-none transition-all min-h-[90px]"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Department</label>
+            {/* Department, Visibility & Status */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Department
+                </label>
                 <input
                   type="text"
-                  className="w-full border-slate-200 rounded-md p-2 border focus:ring-2 focus:ring-primary-500 focus:outline-none"
+                  placeholder="e.g., Engineering"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-primary-500 focus:outline-none"
                   value={formData.department}
                   onChange={(e) => setFormData({ ...formData, department: e.target.value })}
                 />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Visibility</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Visibility
+                </label>
                 <select
-                  className="w-full border-slate-200 rounded-md p-2 border bg-white focus:ring-2 focus:ring-primary-500 focus:outline-none"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-primary-500 focus:outline-none cursor-pointer"
                   value={formData.visibility}
                   onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
                 >
@@ -152,50 +241,102 @@ export default function KnowledgeBaseSettings() {
                 </select>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Status</label>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  Lifecycle Status
+                </label>
                 <select
-                  className="w-full border-slate-200 rounded-md p-2 border bg-white focus:ring-2 focus:ring-primary-500 focus:outline-none"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-primary-500 focus:outline-none cursor-pointer"
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
                 >
                   <option value="active">Active</option>
-                  <option value="archived">Archived</option>
+                  <option value="archived">Archived (Read-Only)</option>
                 </select>
               </div>
             </div>
           </CardContent>
-          <div className="p-6 pt-0 flex justify-end gap-3 border-t border-slate-100 mt-6">
-            <Button variant="ghost" onClick={() => navigate(`/knowledge-bases/${id}`)} type="button">
+
+          {/* Form Actions */}
+          <div className="p-6 bg-slate-50/60 border-t border-slate-100 flex items-center justify-between rounded-b-lg">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/knowledge-bases/${id}`)}
+              disabled={saving}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? <Loader2 className="animate-spin" size={18} /> : 'Save Changes'}
+            <Button
+              type="submit"
+              size="sm"
+              disabled={saving}
+              className="gap-2 min-w-[120px]"
+            >
+              {saving ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Save size={15} />
+                  <span>Save Changes</span>
+                </>
+              )}
             </Button>
           </div>
         </form>
       </Card>
 
-      <Card className="border-red-200">
-        <CardHeader>
-          <CardTitle className="text-red-600">Danger Zone</CardTitle>
-          <CardDescription>Permanently delete this knowledge base and all of its contents.</CardDescription>
+      {/* Danger Zone */}
+      <Card className="border-red-200/80 bg-red-50/20 shadow-sm">
+        <CardHeader className="border-b border-red-100 pb-4">
+          <div className="flex items-center gap-2 text-red-600">
+            <ShieldAlert size={20} />
+            <CardTitle className="text-base font-semibold text-red-700">
+              Danger Zone
+            </CardTitle>
+          </div>
+          <CardDescription className="text-xs text-red-600/80">
+            Irreversible actions regarding this Knowledge Base.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-slate-500 mb-4">
-            Once you delete a knowledge base, there is no going back. Please be certain.
-          </p>
-          <Button 
-            variant="ghost" 
-            className="text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 w-full md:w-auto"
-            onClick={handleDelete}
-            disabled={deleting}
-          >
-            {deleting ? <Loader2 className="animate-spin mr-2" size={16} /> : <Trash2 className="mr-2" size={16} />}
-            Delete Knowledge Base
-          </Button>
+        <CardContent className="p-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900">
+                Delete Knowledge Base
+              </h4>
+              <p className="text-xs text-slate-500 mt-0.5 max-w-md">
+                Permanently deletes the knowledge base, all contained documents, metadata, and AI vector indices.
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowDeleteModal(true)}
+              className="shrink-0 gap-2"
+            >
+              <Trash2 size={14} />
+              <span>Delete Knowledge Base</span>
+            </Button>
+          </div>
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmationDialog
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDelete}
+        title={`Delete "${formData.name}"?`}
+        description="Are you certain you want to permanently delete this knowledge base? This action is irreversible and all document embeddings will be wiped immediately."
+        confirmText="Yes, Delete Permanently"
+        variant="destructive"
+        loading={deleting}
+      />
     </div>
   );
 }
