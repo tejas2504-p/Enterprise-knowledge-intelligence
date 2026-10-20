@@ -363,3 +363,51 @@ def test_api_chunk_document_unauthorized():
         headers={"x-api-key": "invalid_key"},
     )
     assert response.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# 10. Direct MongoDB Consumption Service Interface Test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_chunk_document_from_db_consumption():
+    from unittest.mock import AsyncMock, MagicMock
+    from app.services.chunking import chunking_service
+
+    mock_doc = {
+        "_id": "670f1a2b3c4d5e6f7a8b9c0d",
+        "extractedText": "Processed document text stored by Node.js pipeline. Second paragraph with detailed specs.",
+        "originalFileName": "system_design.pdf",
+        "department": "Engineering",
+        "pageCount": 3,
+        "knowledgeBase": "670f1a2b3c4d5e6f7a8b9c0e",
+        "metadata": {"source": "s3"}
+    }
+    mock_kb = {
+        "_id": "670f1a2b3c4d5e6f7a8b9c0e",
+        "organization": "EnterpriseOrg",
+        "department": "Engineering"
+    }
+
+    collections = {
+        "documents": MagicMock(find_one=AsyncMock(return_value=mock_doc)),
+        "knowledgebases": MagicMock(find_one=AsyncMock(return_value=mock_kb)),
+    }
+    mock_db = MagicMock()
+    mock_db.__getitem__.side_effect = lambda key: collections[key]
+
+    res = await chunking_service.chunk_document_from_db(
+        db=mock_db,
+        document_id="670f1a2b3c4d5e6f7a8b9c0d",
+        chunk_size=100,
+        chunk_overlap=20,
+    )
+
+    assert res.status == "success"
+    assert res.document_id == "670f1a2b3c4d5e6f7a8b9c0d"
+    assert res.total_chunks >= 1
+    assert res.chunks[0].metadata["filename"] == "system_design.pdf"
+    assert res.chunks[0].metadata["organization_id"] == "EnterpriseOrg"
+    assert res.chunks[0].metadata["department"] == "Engineering"
+    assert res.chunks[0].metadata["source"] == "s3"
+

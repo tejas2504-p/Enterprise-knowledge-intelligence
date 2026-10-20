@@ -75,6 +75,16 @@ class PageTracker:
         return None, None, None
 
 
+class TextSegment:
+    """
+    Represents an atomic text segment with its exact source character offsets.
+    """
+    def __init__(self, text: str, start_char: int, end_char: int):
+        self.text = text
+        self.start_char = start_char
+        self.end_char = end_char
+
+
 class TextChunker:
     """
     Reusable text chunking engine.
@@ -109,17 +119,17 @@ class TextChunker:
                 f"chunk_overlap ({self.chunk_overlap}) must be strictly less than chunk_size ({self.chunk_size})"
             )
 
-    def _split_into_segments(self, text: str, separators: list[str]) -> list[str]:
+    def _split_into_segments(self, text: str, start_offset: int, separators: list[str]) -> list[TextSegment]:
         """
         Recursively break text into natural units according to separator hierarchy
         until all units are within chunk_size tokens.
-        Preserves delimiters so text is not lost.
+        Preserves delimiters and tracks exact character coordinates.
         """
         if not text:
             return []
 
         if self.tokenizer.count_tokens(text) <= self.chunk_size:
-            return [text]
+            return [TextSegment(text, start_offset, start_offset + len(text))]
 
         # Find the first valid separator present in the text
         active_sep = None
@@ -140,29 +150,37 @@ class TextChunker:
 
         if active_sep == "":
             # Character fallback: split into chunks of character length matching token budget
-            # Approximate 4 characters per token as a safe ceiling
             char_step = max(1, self.chunk_size * 3)
-            return [text[j:j + char_step] for j in range(0, len(text), char_step)]
+            segments: list[TextSegment] = []
+            for j in range(0, len(text), char_step):
+                sub = text[j:j + char_step]
+                segments.append(TextSegment(sub, start_offset + j, start_offset + j + len(sub)))
+            return segments
 
         # Split preserving the separator attached to the preceding text
         parts = text.split(active_sep)
-        segments = []
-        for i, part in enumerate(parts):
-            # Reattach separator except to the very last empty fragment
-            if i < len(parts) - 1:
-                segment = part + active_sep
-            else:
-                segment = part
+        segments: list[TextSegment] = []
+        curr_offset = start_offset
 
-            if not segment:
+        for i, part in enumerate(parts):
+            if i < len(parts) - 1:
+                sub_text = part + active_sep
+            else:
+                sub_text = part
+
+            if not sub_text:
                 continue
 
-            if self.tokenizer.count_tokens(segment) <= self.chunk_size:
-                segments.append(segment)
+            seg_start = curr_offset
+            seg_end = curr_offset + len(sub_text)
+            curr_offset = seg_end
+
+            if self.tokenizer.count_tokens(sub_text) <= self.chunk_size:
+                segments.append(TextSegment(sub_text, seg_start, seg_end))
             else:
                 # Recurse down separator hierarchy for oversize segment
-                sub_segments = self._split_into_segments(segment, new_separators)
-                segments.extend(sub_segments)
+                sub_segs = self._split_into_segments(sub_text, seg_start, new_separators)
+                segments.extend(sub_segs)
 
         return segments
 
@@ -192,63 +210,72 @@ class TextChunker:
             return []
 
         page_tracker = PageTracker(text, page_count=page_count)
-        segments = self._split_into_segments(text, self.separators)
+        segments = self._split_into_segments(text, 0, self.separators)
 
         raw_chunks: list[dict[str, Any]] = []
-        current_accum: list[str] = []
+        current_segments: list[TextSegment] = []
         current_tokens = 0
-        search_cursor = 0
+        overlap_prefix: Optional[tuple[str, int, int]] = None  # (overlap_text, start_char, end_char)
 
         for segment in segments:
-            seg_tokens = self.tokenizer.count_tokens(segment)
-            if current_accum and (current_tokens + seg_tokens > self.chunk_size):
-                # Finalize current chunk
-                chunk_str = "".join(current_accum).strip()
-                if chunk_str:
-                    # Find start_char and end_char in original text
-                    char_pos = text.find(chunk_str, search_cursor)
-                    if char_pos == -1:
-                        char_pos = text.find(chunk_str[:min(50, len(chunk_str))])
-                    if char_pos == -1:
-                        char_pos = search_cursor
+            seg_tokens = self.tokenizer.count_tokens(segment.text)
+            if current_segments and (current_tokens + seg_tokens > self.chunk_size):
+                first_seg = current_segments[0]
+                last_seg = current_segments[-1]
 
-                    start_char = char_pos
-                    end_char = start_char + len(chunk_str)
+                if overlap_prefix:
+                    chunk_text = overlap_prefix[0] + "".join(s.text for s in current_segments)
+                    start_char = overlap_prefix[1]
+                else:
+                    chunk_text = "".join(s.text for s in current_segments)
+                    start_char = first_seg.start_char
+
+                end_char = last_seg.end_char
+                chunk_str = chunk_text.strip()
+
+                if chunk_str:
                     raw_chunks.append({
                         "text": chunk_str,
                         "start_char": start_char,
                         "end_char": end_char,
+                        "primary_char": first_seg.start_char,
                     })
-                    search_cursor = start_char
 
-                # Calculate overlap text from the completed chunk
+                # Compute overlap text for next chunk
                 overlap_text = self.tokenizer.get_overlap_text(chunk_str, self.chunk_overlap)
                 if overlap_text:
-                    current_accum = [overlap_text, segment]
-                    current_tokens = self.tokenizer.count_tokens(overlap_text) + seg_tokens
+                    ov_start = max(start_char, end_char - len(overlap_text))
+                    prefix_str = overlap_text + ("\n\n" if "\n" in overlap_text else " ")
+                    overlap_prefix = (prefix_str, ov_start, end_char)
+                    current_tokens = self.tokenizer.count_tokens(prefix_str) + seg_tokens
                 else:
-                    current_accum = [segment]
+                    overlap_prefix = None
                     current_tokens = seg_tokens
+
+                current_segments = [segment]
             else:
-                current_accum.append(segment)
+                current_segments.append(segment)
                 current_tokens += seg_tokens
 
         # Finalize the last remaining chunk
-        if current_accum:
-            chunk_str = "".join(current_accum).strip()
-            if chunk_str:
-                char_pos = text.find(chunk_str, search_cursor)
-                if char_pos == -1:
-                    char_pos = text.find(chunk_str[:min(50, len(chunk_str))])
-                if char_pos == -1:
-                    char_pos = search_cursor
+        if current_segments:
+            first_seg = current_segments[0]
+            last_seg = current_segments[-1]
+            if overlap_prefix:
+                chunk_text = overlap_prefix[0] + "".join(s.text for s in current_segments)
+                start_char = overlap_prefix[1]
+            else:
+                chunk_text = "".join(s.text for s in current_segments)
+                start_char = first_seg.start_char
 
-                start_char = char_pos
-                end_char = start_char + len(chunk_str)
+            end_char = last_seg.end_char
+            chunk_str = chunk_text.strip()
+            if chunk_str:
                 raw_chunks.append({
                     "text": chunk_str,
                     "start_char": start_char,
                     "end_char": end_char,
+                    "primary_char": first_seg.start_char,
                 })
 
         # Filter out negligible empty chunks if any
@@ -262,8 +289,9 @@ class TextChunker:
             char_count = len(chunk_text)
             start_char = item["start_char"]
             end_char = item["end_char"]
+            primary_char = item.get("primary_char", start_char)
 
-            page_num, start_page, end_page = page_tracker.get_page_info(start_char, end_char)
+            page_num, start_page, end_page = page_tracker.get_page_info(primary_char, end_char)
             chunk_id = self.generate_chunk_id(document_id, idx, chunk_text)
 
             meta: dict[str, Any] = {
