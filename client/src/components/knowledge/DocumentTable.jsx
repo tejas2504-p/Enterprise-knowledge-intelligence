@@ -5,9 +5,7 @@ import {
   Filter, 
   Trash2, 
   Info, 
-  File, 
-  CheckSquare, 
-  Square 
+  File 
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { ProcessingStatusBadge } from '../ui/Badge';

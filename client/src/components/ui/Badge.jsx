@@ -8,8 +8,7 @@ import {
   Loader2, 
   AlertCircle, 
   Clock, 
-  Archive,
-  Sparkles
+  Archive
 } from 'lucide-react';
 
 export function VisibilityBadge({ visibility, className }) {

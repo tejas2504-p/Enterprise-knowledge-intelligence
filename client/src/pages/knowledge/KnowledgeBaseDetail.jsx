@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { getKnowledgeBase } from '../../services/kbService';
 import { 
@@ -13,8 +13,7 @@ import {
   Database, 
   Upload, 
   AlertCircle, 
-  RefreshCw,
-  FolderOpen
+  RefreshCw
 } from 'lucide-react';
 import { VisibilityBadge, StatusBadge } from '../../components/ui/Badge';
 import KbStats from '../../components/knowledge/KbStats';
@@ -27,7 +26,6 @@ import { LoadingSpinner } from '../../components/ui/LoadingState';
 export default function KnowledgeBaseDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const fileInputRef = useRef(null);
 
   const [kb, setKb] = useState(null);
   const [documents, setDocuments] = useState([]);
