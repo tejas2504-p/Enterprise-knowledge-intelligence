@@ -4,9 +4,19 @@ class Settings(BaseSettings):
     SERVICE_API_KEY: str = "internal_service_key_dev"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str | None = None
-    EMBEDDING_PROVIDER: str = "openai"
+    EMBEDDING_PROVIDER: str = "gemini"
     LLM_PROVIDER: str = "openai"
     OPENAI_API_KEY: str | None = None
+    GEMINI_API_KEY: str | None = None
+    EMBEDDING_MODEL: str = "text-embedding-004"
+    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_TASK_TYPE: str = "RETRIEVAL_DOCUMENT"
+    EMBEDDING_BATCH_SIZE: int = 64
+    EMBEDDING_TIMEOUT: float = 30.0
+    EMBEDDING_MAX_RETRIES: int = 4
+    EMBEDDING_BACKOFF_FACTOR: float = 1.5
+    EMBEDDING_MIN_BACKOFF: float = 0.5
+    EMBEDDING_MAX_BACKOFF: float = 10.0
     MONGODB_URI: str | None = None
     
     # Text Chunking Engine Configuration
