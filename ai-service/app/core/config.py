@@ -4,6 +4,11 @@ class Settings(BaseSettings):
     SERVICE_API_KEY: str = "internal_service_key_dev"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str | None = None
+    QDRANT_LOCAL_PATH: str | None = None
+    QDRANT_COLLECTION_NAME: str = "knowledge_chunks"
+    QDRANT_DISTANCE: str = "Cosine"
+    QDRANT_TIMEOUT: float = 20.0
+    QDRANT_PREFER_GRPC: bool = False
     EMBEDDING_PROVIDER: str = "gemini"
     LLM_PROVIDER: str = "openai"
     OPENAI_API_KEY: str | None = None

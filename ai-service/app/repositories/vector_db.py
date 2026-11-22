@@ -1,78 +1,88 @@
-from qdrant_client import QdrantClient
+from typing import Optional
 from qdrant_client.http import models as rest
-from app.core.config import settings
+from app.services.vector_store import (
+    IncompatibleVectorDimensionError,
+    InvalidVectorError,
+    VectorStoreConnectionError,
+    VectorStoreError,
+    VectorStoreService,
+    generate_stable_point_id,
+    vector_store_service,
+)
+
 
 class QdrantRepository:
-    def __init__(self):
-        self.client = QdrantClient(
-            url=settings.QDRANT_URL,
-            api_key=settings.QDRANT_API_KEY
-        )
-        self.collection_name = "knowledge_chunks"
-        self._init_collection()
+    """
+    Repository wrapper delegating to VectorStoreService, ensuring complete backward compatibility
+    with existing callers while providing enterprise vector store capabilities.
+    """
 
-    def _init_collection(self):
-        try:
-            collections = self.client.get_collections()
-            if self.collection_name not in [c.name for c in collections.collections]:
-                self.client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=rest.VectorParams(
-                        size=1536, # OpenAI ada-002 size
-                        distance=rest.Distance.COSINE,
-                    ),
-                )
-        except Exception as e:
-            print(f"Error initializing Qdrant collection: {e}")
+    def __init__(self, service: Optional[VectorStoreService] = None):
+        self.service = service or vector_store_service
 
-    def upsert_vectors(self, points: list[rest.PointStruct]):
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=points
-        )
+    @property
+    def client(self):
+        return self.service.get_client()
 
-    def delete_by_document(self, document_id: str) -> int:
-        res = self.client.delete(
-            collection_name=self.collection_name,
-            points_selector=rest.Filter(
-                must=[
-                    rest.FieldCondition(
-                        key="document_id",
-                        match=rest.MatchValue(value=document_id)
-                    )
-                ]
-            )
-        )
-        return res.status.name if hasattr(res.status, 'name') else str(res.status)
+    @property
+    def collection_name(self):
+        return self.service.collection_name
 
-    def delete_by_knowledge_base(self, knowledge_base_id: str) -> int:
-        res = self.client.delete(
-            collection_name=self.collection_name,
-            points_selector=rest.Filter(
-                must=[
-                    rest.FieldCondition(
-                        key="knowledge_base_id",
-                        match=rest.MatchValue(value=knowledge_base_id)
-                    )
-                ]
-            )
-        )
-        return res.status.name if hasattr(res.status, 'name') else str(res.status)
+    def upsert_vectors(self, points: list[rest.PointStruct]) -> int:
+        return self.service.upsert_points(points)
 
-    def search(self, query_vector: list[float], knowledge_base_ids: list[str], limit: int = 5):
-        kb_filter = rest.Filter(
-            must=[
-                rest.FieldCondition(
-                    key="knowledge_base_id",
-                    match=rest.MatchAny(any=knowledge_base_ids)
-                )
-            ]
-        )
-        return self.client.search(
-            collection_name=self.collection_name,
+    def delete_by_document(self, document_id: str) -> str:
+        self.service.delete_by_document(document_id)
+        return "COMPLETED"
+
+    def delete_by_knowledge_base(self, knowledge_base_id: str) -> str:
+        self.service.delete_by_knowledge_base(knowledge_base_id)
+        return "COMPLETED"
+
+    def search(
+        self,
+        query_vector: list[float],
+        knowledge_base_ids: list[str],
+        organization_id: Optional[str] = None,
+        department: Optional[str] = None,
+        limit: int = 5,
+    ):
+        results = self.service.search(
             query_vector=query_vector,
-            query_filter=kb_filter,
-            limit=limit
+            knowledge_base_ids=knowledge_base_ids,
+            organization_id=organization_id,
+            department=department,
+            limit=limit,
         )
+
+        class SearchHit:
+            def __init__(self, res):
+                self.id = res.point_id
+                self.score = res.score
+                self.payload = {
+                    "document_id": res.document_id,
+                    "knowledge_base_id": res.knowledge_base_id,
+                    "text": res.text,
+                    "title": res.title or "",
+                    "filename": res.filename or "",
+                    "department": res.department,
+                    "organization_id": res.organization_id,
+                    "chunk_index": res.chunk_index,
+                    "chunk_id": res.chunk_id,
+                    "page_number": res.page_number,
+                }
+
+        return [SearchHit(r) for r in results]
+
 
 vector_db = QdrantRepository()
+
+__all__ = [
+    "vector_db",
+    "QdrantRepository",
+    "generate_stable_point_id",
+    "VectorStoreError",
+    "VectorStoreConnectionError",
+    "IncompatibleVectorDimensionError",
+    "InvalidVectorError",
+]
