@@ -419,13 +419,23 @@ class VectorStoreService:
         query_filter = models.Filter(must=must_conditions) if must_conditions else None
 
         try:
-            search_results = client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                query_filter=query_filter,
-                limit=limit,
-                score_threshold=score_threshold,
-            )
+            if hasattr(client, "query_points"):
+                query_res = client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_vector,
+                    query_filter=query_filter,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                )
+                search_results = query_res.points if hasattr(query_res, "points") else query_res
+            else:
+                search_results = client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    query_filter=query_filter,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                )
 
             results: list[VectorSearchResult] = []
             for hit in search_results:

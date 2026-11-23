@@ -17,6 +17,7 @@ class EmbeddedChunk(BaseModel):
     """A document chunk enriched with its vector embedding and configuration metadata."""
     chunk_id: str
     chunk_index: int
+    text: str = ""
     embedding: list[float]
     dimension: int
     model: str

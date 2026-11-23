@@ -499,6 +499,7 @@ class GeminiEmbeddingService:
                 EmbeddedChunk(
                     chunk_id=chunk.chunk_id,
                     chunk_index=chunk.chunk_index,
+                    text=chunk.text,
                     embedding=vector,
                     dimension=target_dim,
                     model=target_model,

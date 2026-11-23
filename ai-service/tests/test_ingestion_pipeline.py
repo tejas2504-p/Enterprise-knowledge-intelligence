@@ -174,7 +174,9 @@ async def test_batch_ingestion_handles_partial_failures():
             raise ValueError("Upstream embedding quota exceeded")
         return await RagService.index_document(rag, req, db=db)
 
-    with patch.object(rag, "index_document", side_effect=mock_index_dispatch):
+    with patch("app.services.embedding_service.gemini_embedding_service._client", mock_gemini), \
+         patch("app.services.rag.vector_store_service", mem_vector_store), \
+         patch.object(rag, "index_document", side_effect=mock_index_dispatch):
         batch_req = BatchIndexDocumentRequest(documents=[doc_valid, doc_failing])
         resp = await rag.batch_index_documents(batch_req)
 
@@ -230,7 +232,8 @@ def test_service_to_service_auth_enforcement():
 
     # 3. Valid Service Key
     with patch("app.services.rag.rag_service.index_document", new_callable=AsyncMock) as mock_index:
-        mock_index.return_value = MagicMock(status="success", document_id="1", chunks_indexed=2, indexed_at="2026-11-23T00:00:00Z")
+        from app.models.document import IndexDocumentResponse
+        mock_index.return_value = IndexDocumentResponse(status="success", document_id="1", chunks_indexed=2, indexed_at="2026-11-23T00:00:00Z")
         resp_good_auth = client.post(
             "/api/internal/documents/index",
             json={"document_id": "1", "knowledge_base_id": "1", "text": "test"},
