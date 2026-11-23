@@ -292,3 +292,49 @@ export const deleteKB = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Trigger re-indexing of all processed documents in a Knowledge Base
+// @route   POST /api/knowledge-bases/:id/index
+// @access  Private
+export const indexKBDocuments = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Invalid Knowledge Base ID format',
+      });
+    }
+
+    const kb = await KnowledgeBase.findById(id);
+    if (!kb) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Knowledge Base not found',
+      });
+    }
+
+    if (!canUserAccessKB(req.user, kb)) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'Not authorized to access this Knowledge Base',
+      });
+    }
+
+    const docs = await Document.find({
+      knowledgeBase: kb._id,
+      processingStatus: 'processed',
+    });
+
+    const docIds = docs.map((d) => d._id.toString());
+    const results = await documentProcessingService.batchIndexDocuments(docIds);
+
+    res.status(200).json({
+      status: 'success',
+      data: results,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

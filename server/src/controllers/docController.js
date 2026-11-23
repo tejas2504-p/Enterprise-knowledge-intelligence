@@ -220,3 +220,60 @@ export const deleteDocument = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Trigger re-indexing of an existing processed document
+// @route   POST /api/documents/:id/index
+// @access  Private
+export const reindexDocument = async (req, res, next) => {
+  try {
+    const doc = await Document.findById(req.params.id);
+
+    if (!doc) {
+      res.status(404);
+      throw new Error('Document not found');
+    }
+
+    const kb = await KnowledgeBase.findById(doc.knowledgeBase);
+    if (!kb) {
+      res.status(404);
+      throw new Error('Associated Knowledge Base not found');
+    }
+
+    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+      res.status(403);
+      throw new Error('Not authorized to access this Document');
+    }
+
+    const updatedDoc = await documentProcessingService.indexExistingDocument(doc._id);
+
+    res.status(200).json({
+      status: 'success',
+      data: updatedDoc,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Batch re-index multiple documents
+// @route   POST /api/documents/batch-index
+// @access  Private
+export const batchIndexDocuments = async (req, res, next) => {
+  try {
+    const { document_ids } = req.body;
+
+    if (!document_ids || !Array.isArray(document_ids) || document_ids.length === 0) {
+      res.status(400);
+      throw new Error('Please provide an array of document_ids');
+    }
+
+    const results = await documentProcessingService.batchIndexDocuments(document_ids);
+
+    res.status(200).json({
+      status: 'success',
+      data: results,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

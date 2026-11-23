@@ -58,6 +58,23 @@ const documentSchema = new mongoose.Schema(
     processingError: {
       type: String,
     },
+    indexingStatus: {
+      type: String,
+      enum: ['pending', 'processing', 'indexed', 'failed'],
+      default: 'pending',
+    },
+    indexingError: {
+      type: String,
+      default: null,
+    },
+    indexedAt: {
+      type: Date,
+      default: null,
+    },
+    chunksCount: {
+      type: Number,
+      default: 0,
+    },
     extractedText: {
       type: String,
     },
@@ -87,6 +104,7 @@ const documentSchema = new mongoose.Schema(
 documentSchema.index({ knowledgeBase: 1 });
 documentSchema.index({ uploadedBy: 1 });
 documentSchema.index({ processingStatus: 1 });
+documentSchema.index({ indexingStatus: 1 });
 documentSchema.index({ createdAt: -1 });
 documentSchema.index({ checksum: 1 });
 

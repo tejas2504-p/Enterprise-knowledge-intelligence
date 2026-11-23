@@ -1,5 +1,5 @@
 import express from 'express';
-import { createKB, getKBs, getKB, updateKB, deleteKB } from '../controllers/kbController.js';
+import { createKB, getKBs, getKB, updateKB, deleteKB, indexKBDocuments } from '../controllers/kbController.js';
 import { getDocumentsByKB, uploadDocument } from '../controllers/docController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import { validateCreateKB, validateUpdateKB, validateKBId } from '../middleware/kbValidationMiddleware.js';
@@ -18,6 +18,8 @@ router.route('/:id')
   .get(validateKBId, getKB)
   .patch(validateKBId, validateUpdateKB, updateKB)
   .delete(validateKBId, deleteKB);
+
+router.post('/:id/index', validateKBId, indexKBDocuments);
 
 router.route('/:knowledgeBaseId/documents')
   .get(getDocumentsByKB)
