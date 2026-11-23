@@ -276,6 +276,7 @@ def test_filtered_search_enforces_organization_and_kb_boundaries():
         "department": "Engineering",
     }
     mock_client.search.return_value = [mock_hit]
+    mock_client.query_points.return_value = MagicMock(points=[mock_hit])
 
     service = VectorStoreService(
         collection_name="test_col",
@@ -299,7 +300,8 @@ def test_filtered_search_enforces_organization_and_kb_boundaries():
     assert res.organization_id == "org_global"
 
     # Verify query filter passed to Qdrant enforces boundaries
-    search_kwargs = mock_client.search.call_args.kwargs
+    call_args = mock_client.query_points.call_args or mock_client.search.call_args
+    search_kwargs = call_args.kwargs
     query_filter = search_kwargs["query_filter"]
     assert query_filter is not None
 

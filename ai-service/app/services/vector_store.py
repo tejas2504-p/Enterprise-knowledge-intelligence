@@ -427,7 +427,20 @@ class VectorStoreService:
                     limit=limit,
                     score_threshold=score_threshold,
                 )
-                search_results = query_res.points if hasattr(query_res, "points") else query_res
+                if hasattr(query_res, "points") and isinstance(query_res.points, list):
+                    search_results = query_res.points
+                elif isinstance(query_res, list):
+                    search_results = query_res
+                elif hasattr(client, "search"):
+                    search_results = client.search(
+                        collection_name=self.collection_name,
+                        query_vector=query_vector,
+                        query_filter=query_filter,
+                        limit=limit,
+                        score_threshold=score_threshold,
+                    )
+                else:
+                    search_results = []
             else:
                 search_results = client.search(
                     collection_name=self.collection_name,
