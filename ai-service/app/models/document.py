@@ -63,7 +63,27 @@ class IndexDocumentRequest(BaseModel):
 
 class IndexDocumentResponse(BaseModel):
     status: str
-    chunks_indexed: int
+    document_id: str | None = None
+    chunks_indexed: int = 0
+    indexed_at: str | None = None
+    error: str | None = None
+
+class DocumentIndexResult(BaseModel):
+    document_id: str
+    status: str  # 'indexed' or 'failed'
+    chunks_indexed: int = 0
+    error: str | None = None
+
+class BatchIndexDocumentRequest(BaseModel):
+    documents: list[IndexDocumentRequest] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
+
+class BatchIndexDocumentResponse(BaseModel):
+    status: str  # 'success', 'partial_success', or 'failed'
+    total_documents: int
+    successful_documents: int
+    failed_documents: int
+    results: list[DocumentIndexResult]
 
 class DeleteDocumentResponse(BaseModel):
     status: str
