@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     EMBEDDING_BACKOFF_FACTOR: float = 1.5
     EMBEDDING_MIN_BACKOFF: float = 0.5
     EMBEDDING_MAX_BACKOFF: float = 10.0
+    
+    # RAG Generation Configuration
+    GEMINI_GENERATION_MODEL: str = "gemini-2.5-flash"
+    RAG_TOP_K: int = 5
+    RAG_SIMILARITY_THRESHOLD: float = 0.65
+    RAG_TEMPERATURE: float = 0.0
+    RAG_MAX_OUTPUT_TOKENS: int = 2048
+    RAG_GENERATION_TIMEOUT: float = 30.0
+    
     MONGODB_URI: str | None = None
     
     # Text Chunking Engine Configuration

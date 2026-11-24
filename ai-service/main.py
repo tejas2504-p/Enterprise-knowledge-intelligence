@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.config import settings
 from app.api.routes import router as internal_router
+from app.api.rag_routes import router as rag_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
