@@ -39,3 +39,4 @@ async def health_check():
     return {"status": "ok", "database": db_status}
 
 app.include_router(internal_router, prefix="/api/internal", tags=["internal"])
+app.include_router(rag_router, prefix="/api/rag", tags=["rag"])
