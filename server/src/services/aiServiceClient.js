@@ -30,6 +30,8 @@ const ragClient = axios.create({
   timeout: 45000, // 45s timeout for retrieval + Gemini answer generation
 });
 
+export { aiClient, ragClient };
+
 /**
  * Cryptographically sign the authenticated user's server-verified identity claims
  * so the Python AI service can verify authenticity without trusting client headers.

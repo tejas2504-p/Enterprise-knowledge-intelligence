@@ -2,43 +2,8 @@ import mongoose from 'mongoose';
 import KnowledgeBase from '../models/KnowledgeBase.js';
 import Document from '../models/Document.js';
 import { deleteKnowledgeBaseFromAI } from '../services/aiServiceClient.js';
-
-/**
- * Helper to check whether user has modification permission on a Knowledge Base.
- * Rules:
- * - Creator/Owner of the KB has modification permission.
- * - Platform admins (role: 'admin') have modification permission.
- */
-const canUserModifyKB = (user, kb) => {
-  if (!user || !kb) return false;
-  if (user.role === 'admin') return true;
-  const ownerId = kb.owner?._id ? kb.owner._id.toString() : kb.owner?.toString();
-  return ownerId === user._id.toString();
-};
-
-/**
- * Helper to check whether user has read permission on a Knowledge Base.
- * Rules:
- * - Owner and admins always have access.
- * - 'organization' visibility is accessible to any authenticated user in the organization.
- * - 'department' visibility is accessible if user's department matches kb's department.
- * - 'private' visibility is only accessible to owner or admin.
- */
-const canUserViewKB = (user, kb) => {
-  if (!user || !kb) return false;
-  if (user.role === 'admin') return true;
-
-  const ownerId = kb.owner?._id ? kb.owner._id.toString() : kb.owner?.toString();
-  if (ownerId === user._id.toString()) return true;
-
-  if (kb.visibility === 'organization') return true;
-
-  if (kb.visibility === 'department' && user.department && kb.department === user.department) {
-    return true;
-  }
-
-  return false;
-};
+import { documentProcessingService } from '../services/documentProcessingService.js';
+import { canUserModifyKB, canUserViewKB } from '../utils/accessControl.js';
 
 // @desc    Create a new knowledge base
 // @route   POST /api/knowledge-bases
@@ -315,7 +280,7 @@ export const indexKBDocuments = async (req, res, next) => {
       });
     }
 
-    if (!canUserAccessKB(req.user, kb)) {
+    if (!canUserViewKB(req.user, kb)) {
       return res.status(403).json({
         status: 'fail',
         message: 'Not authorized to access this Knowledge Base',

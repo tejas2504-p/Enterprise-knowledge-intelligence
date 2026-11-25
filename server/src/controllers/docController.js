@@ -1,10 +1,16 @@
 import fs from 'fs';
 import path from 'path';
+import mongoose from 'mongoose';
 import KnowledgeBase from '../models/KnowledgeBase.js';
 import Document from '../models/Document.js';
 import { storageProvider } from '../services/storageProvider.js';
 import { documentProcessingService } from '../services/documentProcessingService.js';
 import { deleteDocumentFromAI } from '../services/aiServiceClient.js';
+import {
+  canUserDeleteDocument,
+  canUserReadDocument,
+  canUserViewKB,
+} from '../utils/accessControl.js';
 
 // @desc    Upload document to a KB
 // @route   POST /api/knowledge-bases/:knowledgeBaseId/documents
@@ -12,7 +18,7 @@ import { deleteDocumentFromAI } from '../services/aiServiceClient.js';
 export const uploadDocument = async (req, res, next) => {
   try {
     const { knowledgeBaseId } = req.params;
-    
+
     if (!knowledgeBaseId) {
       res.status(400);
       throw new Error('Knowledge Base ID is required');
@@ -23,10 +29,9 @@ export const uploadDocument = async (req, res, next) => {
       throw new Error('Please upload a file');
     }
 
-    // Check if KB exists and belongs to user or accessible
+    // Check if KB exists and user is authorized
     const kb = await KnowledgeBase.findById(knowledgeBaseId);
     if (!kb) {
-      // Clean up uploaded temp file
       if (fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
@@ -34,7 +39,7 @@ export const uploadDocument = async (req, res, next) => {
       throw new Error('Knowledge Base not found');
     }
 
-    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+    if (!canUserViewKB(req.user, kb)) {
       if (fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
@@ -59,7 +64,14 @@ export const uploadDocument = async (req, res, next) => {
     }
 
     try {
-      // Create Document record
+      const allowedVisibilities = ['private', 'public', 'restricted'];
+      const visibility = allowedVisibilities.includes(req.body?.visibility)
+        ? req.body.visibility
+        : kb.visibility === 'private'
+          ? 'private'
+          : 'public';
+
+      // Create Document record inheriting KB metadata
       const doc = await Document.create({
         title: req.body.title || req.file.originalname,
         originalFileName: req.file.originalname,
@@ -70,6 +82,8 @@ export const uploadDocument = async (req, res, next) => {
         storageKey: fileInfo.storageKey,
         url: fileInfo.url,
         knowledgeBase: kb._id,
+        department: kb.department || null,
+        visibility,
         uploadedBy: req.user._id,
         processingStatus: 'uploaded',
       });
@@ -80,7 +94,7 @@ export const uploadDocument = async (req, res, next) => {
       await kb.save();
 
       // Trigger asynchronous text extraction processing (Phase 2)
-      documentProcessingService.processDocument(doc._id).catch(err => {
+      documentProcessingService.processDocument(doc._id).catch((err) => {
         console.error('Background processing error:', err);
       });
 
@@ -89,7 +103,6 @@ export const uploadDocument = async (req, res, next) => {
         data: doc,
       });
     } catch (dbError) {
-      // Clean up file if database creation fails
       await storageProvider.deleteFile(fileInfo.storageKey);
       res.status(500);
       throw new Error('Failed to save document metadata: ' + dbError.message);
@@ -98,18 +111,23 @@ export const uploadDocument = async (req, res, next) => {
     if (req.file && fs.existsSync(req.file.path)) {
       try {
         fs.unlinkSync(req.file.path);
-      } catch(e) {}
+      } catch (e) {}
     }
     next(error);
   }
 };
 
-// @desc    Get documents for a KB
+// @desc    Get authorized documents for a KB
 // @route   GET /api/knowledge-bases/:knowledgeBaseId/documents
 // @access  Private
 export const getDocumentsByKB = async (req, res, next) => {
   try {
     const { knowledgeBaseId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(knowledgeBaseId)) {
+      res.status(400);
+      throw new Error('Invalid Knowledge Base ID format');
+    }
 
     const kb = await KnowledgeBase.findById(knowledgeBaseId);
     if (!kb) {
@@ -117,17 +135,21 @@ export const getDocumentsByKB = async (req, res, next) => {
       throw new Error('Knowledge Base not found');
     }
 
-    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+    if (!canUserViewKB(req.user, kb)) {
       res.status(403);
       throw new Error('Not authorized to access this Knowledge Base');
     }
 
-    const docs = await Document.find({ knowledgeBase: knowledgeBaseId }).sort('-createdAt').populate('uploadedBy', 'name email');
+    const docs = await Document.find({ knowledgeBase: knowledgeBaseId })
+      .sort('-createdAt')
+      .populate('uploadedBy', 'name email');
+
+    const authorizedDocs = docs.filter((doc) => canUserReadDocument(req.user, doc, kb));
 
     res.status(200).json({
       status: 'success',
-      count: docs.length,
-      data: docs,
+      count: authorizedDocs.length,
+      data: authorizedDocs,
     });
   } catch (error) {
     next(error);
@@ -139,6 +161,11 @@ export const getDocumentsByKB = async (req, res, next) => {
 // @access  Private
 export const getDocument = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      res.status(400);
+      throw new Error('Invalid Document ID format');
+    }
+
     const doc = await Document.findById(req.params.id).populate('uploadedBy', 'name email');
 
     if (!doc) {
@@ -148,11 +175,11 @@ export const getDocument = async (req, res, next) => {
 
     const kb = await KnowledgeBase.findById(doc.knowledgeBase);
     if (!kb) {
-       res.status(404);
-       throw new Error('Associated Knowledge Base not found');
+      res.status(404);
+      throw new Error('Associated Knowledge Base not found');
     }
 
-    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+    if (!canUserReadDocument(req.user, doc, kb)) {
       res.status(403);
       throw new Error('Not authorized to access this Document');
     }
@@ -171,6 +198,11 @@ export const getDocument = async (req, res, next) => {
 // @access  Private
 export const deleteDocument = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      res.status(400);
+      throw new Error('Invalid Document ID format');
+    }
+
     const doc = await Document.findById(req.params.id);
 
     if (!doc) {
@@ -179,9 +211,8 @@ export const deleteDocument = async (req, res, next) => {
     }
 
     const kb = await KnowledgeBase.findById(doc.knowledgeBase);
-    
-    // Only allow deletion if user owns the document or the KB
-    if (doc.uploadedBy.toString() !== req.user._id.toString() && (!kb || kb.owner.toString() !== req.user._id.toString())) {
+
+    if (!canUserDeleteDocument(req.user, doc, kb)) {
       res.status(403);
       throw new Error('Not authorized to delete this Document');
     }
@@ -189,7 +220,7 @@ export const deleteDocument = async (req, res, next) => {
     // Remove file from storage provider
     if (doc.storageKey) {
       await storageProvider.deleteFile(doc.storageKey);
-    } else if (doc.url && fs.existsSync(doc.url)) { // Fallback for old local files if any
+    } else if (doc.url && fs.existsSync(doc.url)) {
       try {
         fs.unlinkSync(doc.url);
       } catch (e) {
@@ -226,6 +257,11 @@ export const deleteDocument = async (req, res, next) => {
 // @access  Private
 export const reindexDocument = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      res.status(400);
+      throw new Error('Invalid Document ID format');
+    }
+
     const doc = await Document.findById(req.params.id);
 
     if (!doc) {
@@ -239,7 +275,7 @@ export const reindexDocument = async (req, res, next) => {
       throw new Error('Associated Knowledge Base not found');
     }
 
-    if (kb.owner.toString() !== req.user._id.toString() && kb.visibility === 'private') {
+    if (!canUserReadDocument(req.user, doc, kb)) {
       res.status(403);
       throw new Error('Not authorized to access this Document');
     }
@@ -267,7 +303,17 @@ export const batchIndexDocuments = async (req, res, next) => {
       throw new Error('Please provide an array of document_ids');
     }
 
-    const results = await documentProcessingService.batchIndexDocuments(document_ids);
+    const docs = await Document.find({ _id: { $in: document_ids } }).populate('knowledgeBase');
+    const authorizedIds = docs
+      .filter((doc) => doc.knowledgeBase && canUserReadDocument(req.user, doc, doc.knowledgeBase))
+      .map((doc) => doc._id.toString());
+
+    if (authorizedIds.length === 0) {
+      res.status(403);
+      throw new Error('Not authorized to index any of the specified documents');
+    }
+
+    const results = await documentProcessingService.batchIndexDocuments(authorizedIds);
 
     res.status(200).json({
       status: 'success',
