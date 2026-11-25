@@ -183,7 +183,7 @@ async def test_irrelevant_question_or_unsupported_claim_detected():
     # LLM accurately follows instructions and reports lack of evidence for unsupported question
     mock_llm = MagicMock()
     mock_llm.generate_rag_answer.return_value = (
-        "I do not have sufficient evidence in the provided knowledge base to answer this question."
+        "There is insufficient evidence in the provided documents to answer this question."
     )
     mock_llm.model_name = "gemini-2.5-flash"
 

@@ -118,6 +118,12 @@ class RagQueryService:
             "title": kb.get("name", ""),
         }
 
+    def _get_model_name(self) -> str:
+        raw = getattr(self.generation_service, "model_name", None)
+        if isinstance(raw, str) and raw:
+            return raw
+        return getattr(settings, "GEMINI_GENERATION_MODEL", "gemini-2.5-flash")
+
     async def execute_query(
         self,
         request: RagQueryRequest,
@@ -222,7 +228,7 @@ class RagQueryService:
                     knowledge_base_id=clean_kb_id,
                     chunks_retrieved=chunks_retrieved,
                     chunks_used=0,
-                    model=getattr(self.generation_service, "model_name", "gemini-2.5-flash"),
+                    model=self._get_model_name(),
                     similarity_threshold=similarity_threshold,
                     insufficient_evidence=True,
                 ),
@@ -285,7 +291,7 @@ class RagQueryService:
                 knowledge_base_id=clean_kb_id,
                 chunks_retrieved=chunks_retrieved,
                 chunks_used=chunks_used,
-                model=getattr(self.generation_service, "model_name", "gemini-2.5-flash"),
+                model=self._get_model_name(),
                 similarity_threshold=similarity_threshold,
                 insufficient_evidence=is_insufficient,
             ),
