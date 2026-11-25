@@ -1,6 +1,6 @@
-from typing import Optional
-from fastapi import APIRouter, Depends, Header, Request
-from app.api.dependencies import get_api_key
+from fastapi import APIRouter, Depends, Request
+from app.api.dependencies import get_api_key, get_verified_user_context
+from app.core.security import VerifiedUserContext
 from app.models.rag import RagQueryRequest, RagQueryResponse
 from app.services.rag_query_service import rag_query_service
 
@@ -11,11 +11,11 @@ router = APIRouter(dependencies=[Depends(get_api_key)])
 async def query_rag(
     request: RagQueryRequest,
     raw_req: Request,
-    x_user_id: Optional[str] = Header(None, alias="x-user-id"),
-    x_organization_id: Optional[str] = Header(None, alias="x-organization-id"),
+    user_context: VerifiedUserContext = Depends(get_verified_user_context),
 ):
     """
     Core Retrieval-Augmented Generation (RAG) query endpoint.
+    Requires both authenticated service API key and a signed server-side user context token.
     Performs verified access check, semantic vector retrieval with similarity threshold,
     untrusted evidence context assembly, and grounded Gemini answer generation with citations.
     """
@@ -23,6 +23,8 @@ async def query_rag(
     return await rag_query_service.execute_query(
         request=request,
         db=db,
-        user_id=x_user_id,
-        organization_id=x_organization_id,
+        user_id=user_context.user_id,
+        user_role=user_context.role,
+        user_department=user_context.department,
+        organization_id=user_context.organization_id,
     )

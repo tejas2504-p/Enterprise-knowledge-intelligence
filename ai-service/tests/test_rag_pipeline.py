@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 from app.core.config import settings
+from app.core.security import sign_user_context_token
 from app.models.rag import RagQueryRequest, RagQueryResponse
 from app.prompts.rag_prompts import INSUFFICIENT_EVIDENCE_RESPONSE, build_rag_user_prompt
 from app.services.rag_query_service import RagQueryService
@@ -288,6 +289,112 @@ async def test_unauthorized_private_kb_access_raises_403():
     assert "Not authorized to access this private Knowledge Base" in exc_info.value.detail
 
 
+@pytest.mark.anyio
+async def test_department_kb_access_control():
+    rag_service = RagQueryService()
+
+    mock_kb = {
+        "_id": "670f1a2b3c4d5e6f7a8b9c0f",
+        "owner": "user_alice",
+        "visibility": "department",
+        "department": "Engineering",
+        "organization": "org_common",
+        "status": "active",
+    }
+    mock_db = MagicMock()
+    mock_db["knowledgebases"].find_one = AsyncMock(return_value=mock_kb)
+
+    # Mismatched department denied with 403
+    with pytest.raises(Exception) as exc_info:
+        await rag_service.verify_kb_access(
+            knowledge_base_id="670f1a2b3c4d5e6f7a8b9c0f",
+            db=mock_db,
+            user_id="user_bob",
+            user_department="Sales",
+        )
+    assert exc_info.value.status_code == 403
+
+    # Matching department allowed
+    ctx = await rag_service.verify_kb_access(
+        knowledge_base_id="670f1a2b3c4d5e6f7a8b9c0f",
+        db=mock_db,
+        user_id="user_charlie",
+        user_department="Engineering",
+    )
+    assert ctx["knowledge_base_id"] == "670f1a2b3c4d5e6f7a8b9c0f"
+
+    # Admin role allowed regardless of department
+    admin_ctx = await rag_service.verify_kb_access(
+        knowledge_base_id="670f1a2b3c4d5e6f7a8b9c0f",
+        db=mock_db,
+        user_id="user_admin",
+        user_role="admin",
+        user_department="Legal",
+    )
+    assert admin_ctx["knowledge_base_id"] == "670f1a2b3c4d5e6f7a8b9c0f"
+
+
+@pytest.mark.anyio
+async def test_document_level_restrictions_exclude_restricted_docs():
+    mock_vector_store = MagicMock()
+    mock_vector_store.search.return_value = [
+        make_mock_search_result(doc_id="doc_public", text="Public engineering guidelines.", score=0.9)
+    ]
+
+    mock_embed = MagicMock()
+    mock_embed.embed_texts.return_value = MagicMock(embeddings=[[0.05] * 768])
+
+    mock_llm = MagicMock()
+    mock_llm.generate_rag_answer.return_value = "Here are the public guidelines."
+    mock_llm.model_name = "gemini-2.5-flash"
+
+    mock_kb = {
+        "_id": "670f1a2b3c4d5e6f7a8b9c10",
+        "owner": "user_alice",
+        "visibility": "organization",
+        "organization": "org_common",
+        "status": "active",
+    }
+
+    mock_docs = [
+        {"_id": "doc_public", "uploadedBy": "user_alice", "visibility": "public", "indexingStatus": "indexed"},
+        {"_id": "doc_secret", "uploadedBy": "user_alice", "visibility": "restricted", "indexingStatus": "indexed"},
+    ]
+
+    mock_cursor = MagicMock()
+    mock_cursor.to_list = AsyncMock(return_value=mock_docs)
+
+    mock_db = {
+        "knowledgebases": MagicMock(find_one=AsyncMock(return_value=mock_kb)),
+        "documents": MagicMock(find=MagicMock(return_value=mock_cursor)),
+    }
+
+    rag_service = RagQueryService(
+        vector_store=mock_vector_store,
+        embedding_service=mock_embed,
+        generation_service=mock_llm,
+    )
+
+    req = RagQueryRequest(
+        question="Show me guidelines",
+        knowledgeBaseId="670f1a2b3c4d5e6f7a8b9c10",
+    )
+
+    resp = await rag_service.execute_query(
+        request=req,
+        db=mock_db,
+        user_id="user_bob",
+        user_role="user",
+        organization_id="org_common",
+    )
+
+    search_kwargs = mock_vector_store.search.call_args.kwargs
+    # Qdrant MUST receive only doc_public, excluding doc_secret
+    assert search_kwargs["document_ids"] == ["doc_public"]
+    assert len(resp.citations) == 1
+    assert resp.citations[0].document_id == "doc_public"
+
+
 # -----------------------------------------------------------------------------
 # 7. FastAPI Endpoint Integration Test
 # -----------------------------------------------------------------------------
@@ -295,14 +402,47 @@ async def test_unauthorized_private_kb_access_raises_403():
 def test_api_rag_query_endpoint():
     client = TestClient(app)
 
-    # 1. Missing Auth
+    # 1. Missing Auth API Key
     res_no_auth = client.post(
         "/api/rag/query",
         json={"question": "What is the policy?", "knowledgeBaseId": "kb_test"},
     )
     assert res_no_auth.status_code in (401, 403)
 
-    # 2. Valid Auth with Mocked Execution
+    # 2. Valid API Key but MISSING signed user context token -> 401
+    res_no_ctx = client.post(
+        "/api/rag/query",
+        json={"question": "What is the policy?", "knowledgeBaseId": "kb_test"},
+        headers={"x-api-key": settings.SERVICE_API_KEY, "x-user-id": "spoofed_user"},
+    )
+    assert res_no_ctx.status_code == 401
+
+    # 3. Valid API Key but TAMPERED signed user context token -> 401
+    valid_ctx_token = sign_user_context_token(user_id="user_123", role="user", department="Engineering")
+    tampered_token = valid_ctx_token[:-4] + "XXXX"
+    res_tampered = client.post(
+        "/api/rag/query",
+        json={"question": "What is the policy?", "knowledgeBaseId": "kb_test"},
+        headers={
+            "x-api-key": settings.SERVICE_API_KEY,
+            "x-user-context-token": tampered_token,
+        },
+    )
+    assert res_tampered.status_code == 401
+
+    # 4. Valid API Key and EXPIRED signed user context token -> 401
+    expired_token = sign_user_context_token(user_id="user_123", ttl_seconds=-10)
+    res_expired = client.post(
+        "/api/rag/query",
+        json={"question": "What is the policy?", "knowledgeBaseId": "kb_test"},
+        headers={
+            "x-api-key": settings.SERVICE_API_KEY,
+            "x-user-context-token": expired_token,
+        },
+    )
+    assert res_expired.status_code == 401
+
+    # 5. Valid Auth with Signed User Context & Mocked Execution
     mock_response = RagQueryResponse(
         answer="The corporate retention policy is 7 years.",
         citations=[],
@@ -327,7 +467,10 @@ def test_api_rag_query_endpoint():
                 "knowledgeBaseId": "kb_test",
                 "conversationId": "conv_abc123",
             },
-            headers={"x-api-key": settings.SERVICE_API_KEY},
+            headers={
+                "x-api-key": settings.SERVICE_API_KEY,
+                "x-user-context-token": valid_ctx_token,
+            },
         )
 
         assert res.status_code == 200
@@ -335,3 +478,7 @@ def test_api_rag_query_endpoint():
         assert data["answer"] == "The corporate retention policy is 7 years."
         assert data["conversationId"] == "conv_abc123"
         assert data["metadata"]["knowledge_base_id"] == "kb_test"
+        # Verify verified claims were extracted from token cleanly
+        assert mock_exec.call_args.kwargs["user_id"] == "user_123"
+        assert mock_exec.call_args.kwargs["user_role"] == "user"
+        assert mock_exec.call_args.kwargs["user_department"] == "Engineering"

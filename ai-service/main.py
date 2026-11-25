@@ -11,8 +11,11 @@ async def lifespan(app: FastAPI):
     # Startup: Connect to MongoDB
     if settings.MONGODB_URI:
         app.mongodb_client = AsyncIOMotorClient(settings.MONGODB_URI)
-        app.mongodb = app.mongodb_client.get_database("enterprise_knowledge")
-        print("Connected to MongoDB!")
+        try:
+            app.mongodb = app.mongodb_client.get_default_database(default="test")
+        except Exception:
+            app.mongodb = app.mongodb_client.get_database(settings.MONGODB_DB_NAME)
+        print(f"Connected to MongoDB (db={app.mongodb.name})!")
     else:
         print("Warning: MONGODB_URI not found in environment variables.")
     yield

@@ -8,6 +8,7 @@ class VectorSearchFilter(BaseModel):
     knowledge_base_ids: Optional[list[str]] = None
     department: Optional[str] = None
     document_id: Optional[str] = None
+    document_ids: Optional[list[str]] = None
     custom_filters: Optional[dict[str, Any]] = None
 
 

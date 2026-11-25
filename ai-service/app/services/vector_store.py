@@ -348,14 +348,15 @@ class VectorStoreService:
         knowledge_base_ids: Optional[list[str]] = None,
         department: Optional[str] = None,
         document_id: Optional[str] = None,
+        document_ids: Optional[list[str]] = None,
         limit: int = 5,
         score_threshold: Optional[float] = None,
     ) -> list[VectorSearchResult]:
         """
         Perform similarity search in Qdrant with strict pre-retrieval boundary enforcement.
 
-        Enforces tenant (organization_id) and access (knowledge_base_ids) filters at
-        the database level BEFORE vector retrieval, ensuring zero unauthorized data leakage.
+        Enforces tenant (organization_id), access (knowledge_base_ids), and document-level
+        (document_ids) filters at the database level BEFORE vector retrieval, ensuring zero unauthorized data leakage.
         """
         # Validate query vector dimension
         if len(query_vector) != self.dimension:
@@ -364,10 +365,12 @@ class VectorStoreService:
             )
 
         # Authorization Boundary Check:
-        # If knowledge_base_ids was explicitly provided as an empty list, the caller has 0 authorized KBs.
-        # Return empty list immediately without querying the database.
-        if knowledge_base_ids is not None and len(knowledge_base_ids) == 0:
-            logger.debug("Caller has empty knowledge_base_ids list. Returning empty search result.")
+        # If knowledge_base_ids or document_ids was explicitly provided as an empty list,
+        # the caller has 0 authorized targets. Return empty list immediately without querying the database.
+        if (knowledge_base_ids is not None and len(knowledge_base_ids) == 0) or (
+            document_ids is not None and len(document_ids) == 0
+        ):
+            logger.debug("Caller has empty authorized target list. Returning empty search result.")
             return []
 
         self.ensure_collection()
@@ -415,6 +418,21 @@ class VectorStoreService:
                     match=models.MatchValue(value=document_id),
                 )
             )
+        elif document_ids:
+            if len(document_ids) == 1:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(value=document_ids[0]),
+                    )
+                )
+            else:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchAny(any=document_ids),
+                    )
+                )
 
         query_filter = models.Filter(must=must_conditions) if must_conditions else None
 

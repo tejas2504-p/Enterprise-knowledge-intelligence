@@ -29,6 +29,8 @@ class RagRetrievalMetadata(BaseModel):
     model: str
     similarity_threshold: float
     insufficient_evidence: bool = False
+    no_indexed_documents: bool = False
+    indexed_documents: Optional[int] = None
 
 
 class RagQueryResponse(BaseModel):
