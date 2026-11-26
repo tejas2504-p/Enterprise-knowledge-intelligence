@@ -34,7 +34,7 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-    console.error('[Server Error]', err.stack || message);
+    console.error('[Server Error]', sanitizeErrorText(err.stack || message));
   }
 
   // Never reveal internal stack traces or secrets in HTTP error responses
