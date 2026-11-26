@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { FileText, Database, Activity, Bot, Clock, MoreVertical, File } from 'lucide-react';
@@ -5,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const stats = [
     { name: 'Total Documents', value: '12,845', icon: FileText, change: '+12.5%', changeType: 'positive' },
@@ -39,7 +41,7 @@ export default function Dashboard() {
         </div>
         <div className="flex space-x-3">
           <Button variant="outline">View Analytics</Button>
-          <Button variant="primary">New Query</Button>
+          <Button variant="primary" onClick={() => navigate('/assistant')}>New Query</Button>
         </div>
       </div>
 

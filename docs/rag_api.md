@@ -14,9 +14,12 @@ The Enterprise Knowledge Intelligence Platform provides a dedicated, high-perfor
 
 | Header Name | Type | Required | Description |
 |---|---|---|---|
-| `x-api-key` | String | **Yes** | AI Service internal API key matching `AI_SERVICE_API_KEY`. |
-| `x-user-id` | String | Optional | Authenticated caller's user ID for private knowledge base access verification. |
-| `x-organization-id` | String | Optional | Authenticated caller's organization ID for organizational data boundary isolation. |
+| `x-api-key` | String | **Yes** | AI Service internal API key matching `SERVICE_API_KEY`. |
+| `x-user-context-token` | String | **Yes** | HMAC-SHA256 signed server context (`user_id`, `role`, `department`, `organization_id`, `exp`) generated exclusively by the Node.js backend from the verified JWT user session. |
+
+> [!IMPORTANT]
+> **Browser-facing Node.js Gateway (`POST /api/rag/query`, `POST /api/chat`, `GET /api/conversations`)**:
+> Clients authenticate strictly via Node.js JWT cookies / `Authorization: Bearer <token>`. Node.js verifies KB & document access before forwarding the signed `x-user-context-token` to Python. Service keys and LLM credentials are never sent to the browser.
 
 ---
 

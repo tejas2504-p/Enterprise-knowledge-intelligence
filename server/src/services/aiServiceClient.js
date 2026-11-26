@@ -69,10 +69,14 @@ export const createUserContextToken = (user, organizationId = null) => {
  */
 const sanitizeUpstreamMessage = (msg) => {
   if (!msg || typeof msg !== 'string') return 'AI service error';
-  return msg
+  let cleaned = msg
     .replace(/AIza[0-9A-Za-z_-]+/g, '[REDACTED_KEY]')
-    .replace(/internal_service_key[^\s]*/gi, '[REDACTED_SECRET]')
-    .slice(0, 300);
+    .replace(/internal_service_key[^\s]*/gi, '[REDACTED_SECRET]');
+  const activeKey = getServiceApiKey();
+  if (activeKey && cleaned.includes(activeKey)) {
+    cleaned = cleaned.split(activeKey).join('[REDACTED_SECRET]');
+  }
+  return cleaned.slice(0, 300);
 };
 
 /**

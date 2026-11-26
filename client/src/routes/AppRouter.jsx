@@ -17,6 +17,7 @@ import KnowledgeBases from '../pages/knowledge/KnowledgeBases';
 import KnowledgeBaseDetail from '../pages/knowledge/KnowledgeBaseDetail';
 import KnowledgeBaseCreate from '../pages/knowledge/KnowledgeBaseCreate';
 import KnowledgeBaseSettings from '../pages/knowledge/KnowledgeBaseSettings';
+import AiAssistant from '../pages/assistant/AiAssistant';
 
 export default function AppRouter() {
   return (
@@ -43,8 +44,8 @@ export default function AppRouter() {
           <Route path="/knowledge-bases/:id/settings" element={<KnowledgeBaseSettings />} />
           
           <Route path="/documents" element={<div className="p-4">Documents Placeholder</div>} />
-          <Route path="/assistant" element={<div className="p-4">AI Assistant Placeholder</div>} />
-          <Route path="/conversations" element={<div className="p-4">Conversations Placeholder</div>} />
+          <Route path="/assistant" element={<AiAssistant />} />
+          <Route path="/conversations" element={<Navigate to="/assistant" replace />} />
           <Route path="/analytics" element={<div className="p-4">Analytics Placeholder</div>} />
           <Route path="/settings" element={<div className="p-4">Settings Placeholder</div>} />
         </Route>
