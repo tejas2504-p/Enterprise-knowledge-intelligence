@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     RAG_TEMPERATURE: float = 0.0
     RAG_MAX_OUTPUT_TOKENS: int = 2048
     RAG_GENERATION_TIMEOUT: float = 30.0
+    RAG_GENERATION_MAX_RETRIES: int = 2
     
     MONGODB_URI: str | None = None
     

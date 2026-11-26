@@ -59,16 +59,25 @@ class EmbeddingRateLimitError(EmbeddingProviderError):
 def sanitize_error_message(error: Exception | str) -> str:
     """
     Sanitize error messages to ensure API keys, authorization headers,
-    and raw document texts are never logged or exposed.
+    URI passwords, and secrets are never logged or exposed.
     """
     raw_str = str(error)
     # Mask Gemini / Google API keys (AIza...)
     sanitized = re.sub(r"AIza[0-9A-Za-z_\-]+", "[REDACTED_API_KEY]", raw_str)
     # Mask OpenAI-style keys (sk-...)
     sanitized = re.sub(r"sk-[0-9A-Za-z_\-]+", "[REDACTED_API_KEY]", sanitized)
+    # Mask URI embedded credentials (e.g. mongodb+srv://user:pass@host)
+    sanitized = re.sub(r"(://[^:/@\s]+:)([^@\s]+)(@)", r"\1[REDACTED]\3", sanitized)
     # Mask generic key patterns in query params, headers, or assignments
-    sanitized = re.sub(r"(key|api_key|token|secret)\s*[:=]\s*([^\s&]+)", r"\1=[REDACTED]", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"(key|api_key|api-key|token|secret)\s*[:=]\s*([^\s&,;'\"]+)", r"\1=[REDACTED]", sanitized, flags=re.IGNORECASE)
     sanitized = re.sub(r"(bearer|authorization:\s*)([^\s]+)", r"\1[REDACTED]", sanitized, flags=re.IGNORECASE)
+
+    # Mask active configured secrets dynamically
+    for secret_attr in ("GEMINI_API_KEY", "QDRANT_API_KEY", "SERVICE_API_KEY", "OPENAI_API_KEY"):
+        secret_val = getattr(settings, secret_attr, None)
+        if secret_val and isinstance(secret_val, str) and len(secret_val) > 4 and secret_val in sanitized:
+            sanitized = sanitized.replace(secret_val, "[REDACTED]")
+
     return sanitized
 
 

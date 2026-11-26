@@ -1,5 +1,7 @@
 import logging
+import random
 import re
+import time
 from typing import Any, Optional
 
 from app.core.config import settings
@@ -15,10 +17,22 @@ class GenerationError(Exception):
 
 
 class GenerationProviderError(GenerationError):
-    """Raised when the LLM provider fails, returns an error, or times out."""
+    """Raised when the LLM provider fails or returns a non-retryable error."""
     def __init__(self, message: str, status_code: Optional[int] = None):
         super().__init__(message)
         self.status_code = status_code
+
+
+class GenerationRateLimitError(GenerationProviderError):
+    """Raised when Gemini generation hits rate limits (HTTP 429) after retries."""
+    def __init__(self, message: str):
+        super().__init__(message, status_code=429)
+
+
+class GenerationTimeoutError(GenerationProviderError):
+    """Raised when Gemini generation times out after bounded retries."""
+    def __init__(self, message: str):
+        super().__init__(message, status_code=504)
 
 
 class GeminiGenerationService:
@@ -28,7 +42,7 @@ class GeminiGenerationService:
     Features:
     - Configurable Gemini model (default: gemini-2.5-flash)
     - Prompt grounding & untrusted evidence isolation
-    - Provider error handling and bounded timeouts
+    - Bounded exponential backoff retries for 429 rate limits and transient errors/timeouts
     - Chain-of-thought / internal reasoning suppression
     - Zero sensitive credential leakage in telemetry and exceptions
     """
@@ -40,6 +54,9 @@ class GeminiGenerationService:
         temperature: Optional[float] = None,
         max_output_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
+        min_backoff: Optional[float] = None,
+        backoff_factor: Optional[float] = None,
         client: Optional[Any] = None,
     ):
         self.api_key = api_key or getattr(settings, "GEMINI_API_KEY", None)
@@ -47,6 +64,9 @@ class GeminiGenerationService:
         self.temperature = temperature if temperature is not None else getattr(settings, "RAG_TEMPERATURE", 0.0)
         self.max_output_tokens = max_output_tokens or getattr(settings, "RAG_MAX_OUTPUT_TOKENS", 2048)
         self.timeout = timeout if timeout is not None else getattr(settings, "RAG_GENERATION_TIMEOUT", 30.0)
+        self.max_retries = max_retries if max_retries is not None else getattr(settings, "RAG_GENERATION_MAX_RETRIES", 2)
+        self.min_backoff = min_backoff if min_backoff is not None else getattr(settings, "EMBEDDING_MIN_BACKOFF", 0.5)
+        self.backoff_factor = backoff_factor if backoff_factor is not None else getattr(settings, "EMBEDDING_BACKOFF_FACTOR", 1.5)
         self._client = client
 
     def get_client(self) -> Any:
@@ -86,7 +106,8 @@ class GeminiGenerationService:
         system_instruction: Optional[str] = None,
     ) -> str:
         """
-        Generate grounded answer from retrieved evidence using configured Gemini model.
+        Generate grounded answer from retrieved evidence using configured Gemini model,
+        with bounded exponential backoff retries for 429 rate limits and transient errors.
         """
         if not evidence_items:
             return INSUFFICIENT_EVIDENCE_RESPONSE
@@ -103,7 +124,6 @@ class GeminiGenerationService:
             "max_output_tokens": self.max_output_tokens,
         }
 
-        # Explicitly disable or suppress thinking tokens if supported by SDK version
         if hasattr(types, "ThinkingConfig"):
             try:
                 config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
@@ -111,33 +131,83 @@ class GeminiGenerationService:
                 pass
 
         config = types.GenerateContentConfig(**config_kwargs)
+        attempt = 0
 
-        try:
-            logger.debug(
-                "Calling Gemini generate_content with model=%s, evidence_count=%d",
-                self.model_name, len(evidence_items)
-            )
+        while attempt <= self.max_retries:
+            try:
+                logger.debug(
+                    "Calling Gemini generate_content with model=%s, evidence_count=%d, attempt=%d",
+                    self.model_name, len(evidence_items), attempt + 1
+                )
 
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=user_prompt,
-                config=config,
-            )
+                response = client.models.generate_content(
+                    model=self.model_name,
+                    contents=user_prompt,
+                    config=config,
+                )
 
-            if not response or not hasattr(response, "text") or not response.text:
-                logger.warning("Gemini returned empty text response for question")
-                return INSUFFICIENT_EVIDENCE_RESPONSE
+                if not response or not hasattr(response, "text") or not response.text:
+                    logger.warning("Gemini returned empty text response for question")
+                    return INSUFFICIENT_EVIDENCE_RESPONSE
 
-            final_text = self._strip_internal_reasoning(response.text)
-            return final_text if final_text else INSUFFICIENT_EVIDENCE_RESPONSE
+                final_text = self._strip_internal_reasoning(response.text)
+                return final_text if final_text else INSUFFICIENT_EVIDENCE_RESPONSE
 
-        except Exception as exc:
-            safe_err = sanitize_error_message(exc)
-            logger.error("Gemini generation failed for model %s: %s", self.model_name, safe_err)
-            raise GenerationProviderError(
-                f"LLM generation failed: {safe_err}",
-                status_code=getattr(exc, "code", 500)
-            ) from exc
+            except Exception as exc:
+                safe_err = sanitize_error_message(exc)
+                status_code: Optional[int] = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                lower_err = safe_err.lower()
+
+                is_rate_limit = (
+                    status_code == 429
+                    or "resource_exhausted" in lower_err
+                    or "rate_limit" in lower_err
+                    or "rate limit" in lower_err
+                    or "quota" in lower_err
+                )
+                is_timeout = (
+                    isinstance(exc, TimeoutError)
+                    or status_code in (408, 504)
+                    or "timeout" in lower_err
+                    or "timed out" in lower_err
+                    or "deadline" in lower_err
+                )
+                is_transient = (
+                    status_code in (500, 502, 503)
+                    or "unavailable" in lower_err
+                    or "connection" in lower_err
+                )
+
+                if (is_rate_limit or is_timeout or is_transient) and attempt < self.max_retries:
+                    delay = min(10.0, self.min_backoff * (self.backoff_factor ** attempt))
+                    jitter = random.uniform(0, 0.1 * self.min_backoff)
+                    logger.warning(
+                        "Gemini generation transient error (status=%s, attempt %d/%d). Retrying in %.2fs: %s",
+                        status_code or "transient",
+                        attempt + 1,
+                        self.max_retries,
+                        delay + jitter,
+                        safe_err,
+                    )
+                    time.sleep(delay + jitter)
+                    attempt += 1
+                    continue
+
+                logger.error("Gemini generation failed for model %s: %s", self.model_name, safe_err)
+                if is_rate_limit:
+                    raise GenerationRateLimitError(
+                        f"Gemini API rate limit exceeded: {safe_err}"
+                    ) from exc
+                if is_timeout:
+                    raise GenerationTimeoutError(
+                        f"Gemini API generation timed out: {safe_err}"
+                    ) from exc
+                raise GenerationProviderError(
+                    f"LLM generation failed: {safe_err}",
+                    status_code=status_code if isinstance(status_code, int) else 502,
+                ) from exc
+
+        raise GenerationProviderError("LLM generation failed after bounded retries", status_code=502)
 
 
 # Global instance

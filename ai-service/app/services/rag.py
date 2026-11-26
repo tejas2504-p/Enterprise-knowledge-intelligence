@@ -14,12 +14,29 @@ from app.models.document import (
     IndexDocumentResponse,
 )
 from app.services.chunking import chunking_service
-from app.services.embedding_service import gemini_embedding_service, sanitize_error_message
+from app.services.embedding_service import (
+    EmbeddingProviderError,
+    EmbeddingRateLimitError,
+    EmbeddingValidationError,
+    gemini_embedding_service,
+    sanitize_error_message,
+)
 from app.services.embeddings import get_embedding
 from app.services.llm import generate_answer
-from app.services.vector_store import vector_store_service
+from app.services.vector_store import (
+    IncompatibleVectorDimensionError,
+    InvalidVectorError,
+    VectorStoreConnectionError,
+    VectorStoreError,
+    vector_store_service,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class DocumentNotFoundError(Exception):
+    """Raised when a target document ID does not exist in MongoDB."""
+    pass
 
 
 class RagService:
@@ -100,17 +117,18 @@ class RagService:
         metadata = request.metadata or {}
 
         # 1. Fetch extracted text and metadata from DB if text was not provided
-        if not text and db is not None:
+        if text is None and db is not None:
             doc = await self._fetch_document_from_db(db, document_id)
-            if doc:
-                text = doc.get("extractedText", "")
-                kb_id = kb_id or str(doc.get("knowledgeBase", ""))
-                org_id = org_id or doc.get("organization")
-                department = department or doc.get("department")
-                filename = filename or doc.get("originalFileName")
-                title = title or doc.get("title", "")
-                page_count = page_count or doc.get("pageCount")
-                metadata = {**doc.get("metadata", {}), **metadata}
+            if not doc:
+                raise DocumentNotFoundError(f"Document '{document_id}' not found")
+            text = doc.get("extractedText", "")
+            kb_id = kb_id or str(doc.get("knowledgeBase", ""))
+            org_id = org_id or doc.get("organization")
+            department = department or doc.get("department")
+            filename = filename or doc.get("originalFileName")
+            title = title or doc.get("title", "")
+            page_count = page_count or doc.get("pageCount")
+            metadata = {**doc.get("metadata", {}), **metadata}
 
         if not text or not text.strip():
             # Cleanly handle empty document text
@@ -122,6 +140,9 @@ class RagService:
                 chunks_indexed=0,
                 indexed_at=now_iso,
             )
+
+        if not kb_id or not kb_id.strip():
+            raise ValueError(f"Document '{document_id}' is missing a valid knowledge_base_id")
 
         # Mark indexingStatus as processing in MongoDB
         await self._update_db_indexing_status(db, document_id, status="processing")

@@ -8,9 +8,26 @@ from fastapi import HTTPException, status
 from app.core.config import settings
 from app.models.rag import Citation, RagQueryRequest, RagQueryResponse, RagRetrievalMetadata
 from app.prompts.rag_prompts import INSUFFICIENT_EVIDENCE_RESPONSE
-from app.services.embedding_service import gemini_embedding_service
-from app.services.generation_service import gemini_generation_service
-from app.services.vector_store import VectorSearchResult, vector_store_service
+from app.services.embedding_service import (
+    EmbeddingProviderError,
+    EmbeddingRateLimitError,
+    EmbeddingValidationError,
+    gemini_embedding_service,
+    sanitize_error_message,
+)
+from app.services.generation_service import (
+    GenerationProviderError,
+    GenerationRateLimitError,
+    GenerationTimeoutError,
+    gemini_generation_service,
+)
+from app.services.vector_store import (
+    IncompatibleVectorDimensionError,
+    InvalidVectorError,
+    VectorSearchResult,
+    VectorStoreConnectionError,
+    vector_store_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -331,13 +348,40 @@ class RagQueryService:
                 task_type="RETRIEVAL_QUERY",
             )
             if not embed_resp.embeddings:
-                raise ValueError("Embedding service returned empty query vector")
+                raise EmbeddingValidationError("Embedding service returned empty query vector")
             query_vector = embed_resp.embeddings[0]
+        except EmbeddingRateLimitError as e:
+            safe_err = sanitize_error_message(e)
+            logger.error("Embedding rate limit exceeded: %s", safe_err)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Embedding API rate limit exceeded: {safe_err}",
+            ) from e
+        except EmbeddingValidationError as e:
+            safe_err = sanitize_error_message(e)
+            logger.error("Invalid query embedding response: %s", safe_err)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Invalid query embedding response: {safe_err}",
+            ) from e
+        except EmbeddingProviderError as e:
+            safe_err = sanitize_error_message(e)
+            logger.error("Embedding provider failure: %s", safe_err)
+            http_status = (
+                status.HTTP_504_GATEWAY_TIMEOUT
+                if "timeout" in safe_err.lower() or "timed out" in safe_err.lower() or "deadline" in safe_err.lower()
+                else status.HTTP_502_BAD_GATEWAY
+            )
+            raise HTTPException(
+                status_code=http_status,
+                detail=f"Failed to generate query embedding: {safe_err}",
+            ) from e
         except Exception as e:
-            logger.error("Failed to generate query embedding: %s", str(e))
+            safe_err = sanitize_error_message(e)
+            logger.error("Failed to generate query embedding: %s", safe_err)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to generate query embedding: {str(e)}",
+                detail=f"Failed to generate query embedding: {safe_err}",
             ) from e
 
         # 4 & 5. Search Qdrant with Mandatory Access-Control Filters
@@ -352,11 +396,26 @@ class RagQueryService:
 
         try:
             search_hits: list[VectorSearchResult] = self.vector_store.search(**search_kwargs)
+        except VectorStoreConnectionError as e:
+            safe_err = sanitize_error_message(e)
+            logger.error("Vector store unavailable during search: %s", safe_err)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Vector database unavailable: {safe_err}",
+            ) from e
+        except (InvalidVectorError, IncompatibleVectorDimensionError) as e:
+            safe_err = sanitize_error_message(e)
+            logger.error("Vector dimension mismatch during search: %s", safe_err)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Vector dimension incompatibility: {safe_err}",
+            ) from e
         except Exception as e:
-            logger.error("Vector search failed: %s", str(e))
+            safe_err = sanitize_error_message(e)
+            logger.error("Vector search failed: %s", safe_err)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Vector search failed: {str(e)}",
+                detail=f"Vector search failed: {safe_err}",
             ) from e
 
         # Post-filter safeguard: ensure only authorized document IDs survive
@@ -413,12 +472,70 @@ class RagQueryService:
                 question=clean_question,
                 evidence_items=evidence_items,
             )
+        except GenerationRateLimitError as e:
+            safe_err = sanitize_error_message(e)
+            logger.error("Generation rate limit exceeded: %s", safe_err)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"LLM API rate limit exceeded: {safe_err}",
+            ) from e
+        except GenerationTimeoutError as e:
+            safe_err = sanitize_error_message(e)
+            logger.error("Generation timed out: %s", safe_err)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=f"LLM generation timed out: {safe_err}",
+            ) from e
         except Exception as e:
-            logger.error("Generation failed: %s", str(e))
+            safe_err = sanitize_error_message(e)
+            logger.error("Generation failed: %s", safe_err)
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM generation failed: {str(e)}",
+                detail=f"LLM generation failed: {safe_err}",
             ) from e
+
+        # 8b. Anti-Fabrication Citation Verification & Cleanup
+        evidence_marker_pattern = re.compile(r"\[Evidence\s+(\d+)\]", re.IGNORECASE)
+        raw_markers = [int(m.group(1)) for m in evidence_marker_pattern.finditer(generated_answer)]
+        max_evidence_idx = len(surviving_chunks)
+
+        invalid_markers = [n for n in raw_markers if n < 1 or n > max_evidence_idx]
+        valid_markers = [n for n in raw_markers if 1 <= n <= max_evidence_idx]
+
+        # Reject purely fabricated citation outputs (all markers out of bounds)
+        if raw_markers and not valid_markers:
+            logger.warning(
+                "LLM output contained only invalid/fabricated citation references %s (valid: 1..%d). Rejecting.",
+                invalid_markers,
+                max_evidence_idx,
+            )
+            return RagQueryResponse(
+                answer=INSUFFICIENT_EVIDENCE_RESPONSE,
+                citations=[],
+                metadata=RagRetrievalMetadata(
+                    knowledge_base_id=clean_kb_id,
+                    chunks_retrieved=chunks_retrieved,
+                    chunks_used=chunks_used,
+                    model=self._get_model_name(),
+                    similarity_threshold=similarity_threshold,
+                    insufficient_evidence=True,
+                    no_indexed_documents=False,
+                    indexed_documents=doc_stats.get("indexed_documents"),
+                ),
+                conversationId=request.conversationId,
+            )
+
+        if invalid_markers:
+            logger.warning(
+                "Stripped invalid/fabricated citation reference(s) %s from LLM output (valid: 1..%d)",
+                invalid_markers,
+                max_evidence_idx,
+            )
+            generated_answer = evidence_marker_pattern.sub(
+                lambda m: m.group(0) if 1 <= int(m.group(1)) <= max_evidence_idx else "",
+                generated_answer,
+            )
+            generated_answer = re.sub(r" {2,}", " ", generated_answer).strip()
 
         # Check if the LLM output explicitly signaled lack of evidence
         is_insufficient = False
@@ -431,18 +548,31 @@ class RagQueryService:
         ):
             is_insufficient = True
 
-        # 9. Return Answer, Citations, and Retrieval Metadata
-        citations = [
-            Citation(
-                document_id=c.document_id,
-                filename=c.filename,
-                chunk_id=c.chunk_id,
-                page_number=c.page_number,
-                excerpt=extract_relevant_excerpt(c.text, clean_question),
-                score=round(c.score, 4),
-            )
-            for c in surviving_chunks
-        ]
+        # 9. Return Answer, Grounded Citations, and Retrieval Metadata
+        if is_insufficient:
+            citations = []
+        else:
+            if valid_markers:
+                seen_idx: set[int] = set()
+                cited_chunks: list[VectorSearchResult] = []
+                for idx in valid_markers:
+                    if idx not in seen_idx:
+                        seen_idx.add(idx)
+                        cited_chunks.append(surviving_chunks[idx - 1])
+            else:
+                cited_chunks = surviving_chunks
+
+            citations = [
+                Citation(
+                    document_id=c.document_id,
+                    filename=c.filename,
+                    chunk_id=c.chunk_id,
+                    page_number=c.page_number,
+                    excerpt=extract_relevant_excerpt(c.text, clean_question),
+                    score=round(c.score, 4),
+                )
+                for c in cited_chunks
+            ]
 
         return RagQueryResponse(
             answer=generated_answer,

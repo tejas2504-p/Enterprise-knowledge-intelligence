@@ -1,6 +1,7 @@
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.config import settings
 from app.api.routes import router as internal_router
@@ -43,3 +44,12 @@ async def health_check():
 
 app.include_router(internal_router, prefix="/api/internal", tags=["internal"])
 app.include_router(rag_router, prefix="/api/rag", tags=["rag"])
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Prevent internal stack traces or secrets from ever leaking in HTTP responses."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )

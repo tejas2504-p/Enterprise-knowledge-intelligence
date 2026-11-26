@@ -9,6 +9,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from app.core.config import settings
 from app.models.embedding import EmbeddedChunk
 from app.models.vector_store import CollectionMetadata, VectorSearchFilter, VectorSearchResult
+from app.services.embedding_service import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ class VectorStoreService:
                 logger.info("Initializing Qdrant client in local disk mode at %s", self.local_path)
                 self._client = QdrantClient(path=self.local_path)
             else:
-                logger.info("Connecting to remote Qdrant at %s", self.url)
+                logger.info("Connecting to remote Qdrant at %s", sanitize_error_message(self.url))
                 self._client = QdrantClient(
                     url=self.url,
                     api_key=self.api_key,
@@ -133,8 +134,9 @@ class VectorStoreService:
                 )
             return self._client
         except Exception as exc:
-            logger.error("Failed to connect to Qdrant: %s", str(exc))
-            raise VectorStoreConnectionError(f"Could not connect to Qdrant vector store: {str(exc)}") from exc
+            safe_err = sanitize_error_message(exc)
+            logger.error("Failed to connect to Qdrant: %s", safe_err)
+            raise VectorStoreConnectionError(f"Could not connect to Qdrant vector store: {safe_err}") from exc
 
     def ensure_collection(self, allow_recreate: bool = False) -> bool:
         """
@@ -209,8 +211,9 @@ class VectorStoreService:
         except IncompatibleVectorDimensionError:
             raise
         except Exception as exc:
-            logger.error("Failed to ensure collection in Qdrant: %s", str(exc))
-            raise VectorStoreConnectionError(f"Failed to access or configure Qdrant collection: {str(exc)}") from exc
+            safe_err = sanitize_error_message(exc)
+            logger.error("Failed to ensure collection in Qdrant: %s", safe_err)
+            raise VectorStoreConnectionError(f"Failed to access or configure Qdrant collection: {safe_err}") from exc
 
     def upsert_chunks(
         self,
@@ -283,8 +286,9 @@ class VectorStoreService:
             )
             return len(points)
         except Exception as exc:
-            logger.error("Failed to upsert points into Qdrant: %s", str(exc))
-            raise VectorStoreError(f"Failed to upsert points into Qdrant: {str(exc)}") from exc
+            safe_err = sanitize_error_message(exc)
+            logger.error("Failed to upsert points into Qdrant: %s", safe_err)
+            raise VectorStoreError(f"Failed to upsert points into Qdrant: {safe_err}") from exc
 
     def upsert_points(self, points: list[models.PointStruct]) -> int:
         """
@@ -496,9 +500,21 @@ class VectorStoreService:
                 )
 
             return results
+        except VectorStoreConnectionError:
+            raise
         except Exception as exc:
-            logger.error("Vector search failed: %s", str(exc))
-            raise VectorStoreError(f"Vector search failed: {str(exc)}") from exc
+            safe_err = sanitize_error_message(exc)
+            logger.error("Vector search failed: %s", safe_err)
+            lower_err = safe_err.lower()
+            if (
+                isinstance(exc, (ConnectionError, TimeoutError))
+                or "connect" in lower_err
+                or "timeout" in lower_err
+                or "refused" in lower_err
+                or "unavailable" in lower_err
+            ):
+                raise VectorStoreConnectionError(f"Qdrant vector store unavailable: {safe_err}") from exc
+            raise VectorStoreError(f"Vector search failed: {safe_err}") from exc
 
     def delete_by_document(self, document_id: str) -> bool:
         """
@@ -520,8 +536,9 @@ class VectorStoreService:
             )
             return True
         except Exception as exc:
-            logger.error("Failed to delete points for document %s: %s", document_id, str(exc))
-            raise VectorStoreError(f"Failed to delete points for document {document_id}: {str(exc)}") from exc
+            safe_err = sanitize_error_message(exc)
+            logger.error("Failed to delete points for document %s: %s", document_id, safe_err)
+            raise VectorStoreError(f"Failed to delete points for document {document_id}: {safe_err}") from exc
 
     def delete_by_knowledge_base(self, knowledge_base_id: str) -> bool:
         """
@@ -543,8 +560,9 @@ class VectorStoreService:
             )
             return True
         except Exception as exc:
-            logger.error("Failed to delete points for knowledge base %s: %s", knowledge_base_id, str(exc))
-            raise VectorStoreError(f"Failed to delete points for knowledge base {knowledge_base_id}: {str(exc)}") from exc
+            safe_err = sanitize_error_message(exc)
+            logger.error("Failed to delete points for knowledge base %s: %s", knowledge_base_id, safe_err)
+            raise VectorStoreError(f"Failed to delete points for knowledge base {knowledge_base_id}: {safe_err}") from exc
 
     def get_collection_metadata(self) -> CollectionMetadata:
         """

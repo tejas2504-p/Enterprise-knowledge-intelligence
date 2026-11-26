@@ -165,10 +165,7 @@ export const queryRag = async (req, res, next) => {
     // 5. Filter & enrich citations against user-authorized documents in MongoDB
     const rawCitations = Array.isArray(aiResponse?.citations) ? aiResponse.citations : [];
     const safeCitations = rawCitations
-      .filter((citation) => {
-        if (docs.length === 0) return true;
-        return authorizedDocMap.has(String(citation.document_id));
-      })
+      .filter((citation) => authorizedDocMap.has(String(citation.document_id)))
       .map((citation) => {
         const docRecord = authorizedDocMap.get(String(citation.document_id));
         return {
