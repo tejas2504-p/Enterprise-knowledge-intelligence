@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     RAG_MAX_OUTPUT_TOKENS: int = 2048
     RAG_GENERATION_TIMEOUT: float = 30.0
     RAG_GENERATION_MAX_RETRIES: int = 2
+
+    # Query Understanding & Rewriting Configuration (Phase 4)
+    QUERY_UNDERSTANDING_ENABLED: bool = True
+    QUERY_UNDERSTANDING_MODEL: str | None = None
+    QUERY_UNDERSTANDING_TIMEOUT: float = 15.0
+    QUERY_UNDERSTANDING_MAX_TOKENS: int = 768
+    QUERY_UNDERSTANDING_MAX_RETRIES: int = 1
+    QUERY_MAX_ALTERNATIVE_QUERIES: int = 3
+    QUERY_MAX_SUB_QUERIES: int = 4
+    QUERY_MAX_HISTORY_TURNS: int = 6
     
     MONGODB_URI: str | None = None
     
