@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import KnowledgeBase from '../models/KnowledgeBase.js';
 import Document from '../models/Document.js';
 import Conversation from '../models/Conversation.js';
-import { queryRagInAI } from '../services/aiServiceClient.js';
+import { analyzeQueryInAI, queryRagInAI } from '../services/aiServiceClient.js';
 import { canUserReadDocument, canUserViewKB } from '../utils/accessControl.js';
 
 const INSUFFICIENT_EVIDENCE_FALLBACK =
@@ -151,11 +151,29 @@ export const queryRag = async (req, res, next) => {
       (doc) => doc.indexingStatus === 'failed'
     ).length;
 
-    // 4. Call protected Python AI Service with verified server-signed user identity
+    // 4. Collect bounded recent conversation turns for follow-up query resolution
+    const rawHistory = Array.isArray(conversation?.messages)
+      ? conversation.messages.slice(-6)
+      : [];
+    const conversationHistory = rawHistory
+      .filter(
+        (m) =>
+          (m.role === 'user' || m.role === 'assistant') &&
+          typeof m.content === 'string' &&
+          m.content.trim().length > 0
+      )
+      .map((m) => ({
+        role: m.role,
+        content: m.content.trim().slice(0, 1500),
+      }));
+
+    // 5. Call protected Python AI Service with verified server-signed user identity
     const aiResponse = await queryRagInAI({
       question,
       knowledgeBaseId: kb._id.toString(),
       conversationId: conversation ? conversation._id.toString() : null,
+      conversation_history: conversationHistory,
+      enable_query_understanding: req.body?.enable_query_understanding,
       top_k,
       similarity_threshold,
       user: req.user,

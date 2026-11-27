@@ -1,5 +1,6 @@
-from typing import Any, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
+from app.models.query_understanding import ConversationTurn, QueryUnderstandingSummary
 
 
 class RagQueryRequest(BaseModel):
@@ -7,6 +8,14 @@ class RagQueryRequest(BaseModel):
     question: str = Field(..., min_length=1, description="The user's question to answer from knowledge base context")
     knowledgeBaseId: str = Field(..., min_length=1, description="The knowledge base ID to query")
     conversationId: Optional[str] = Field(None, description="Optional conversation tracking identifier")
+    conversation_history: list[ConversationTurn] = Field(
+        default_factory=list,
+        description="Optional bounded prior conversation turns for follow-up resolution",
+    )
+    enable_query_understanding: Optional[bool] = Field(
+        None,
+        description="Optional per-request override for Phase 4 query understanding and rewriting",
+    )
     top_k: Optional[int] = Field(None, ge=1, le=20, description="Optional override for maximum retrieved chunks")
     similarity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Optional override for minimum vector similarity threshold")
 
@@ -31,6 +40,7 @@ class RagRetrievalMetadata(BaseModel):
     insufficient_evidence: bool = False
     no_indexed_documents: bool = False
     indexed_documents: Optional[int] = None
+    query_understanding: Optional[QueryUnderstandingSummary] = None
 
 
 class RagQueryResponse(BaseModel):

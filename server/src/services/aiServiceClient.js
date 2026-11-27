@@ -178,6 +178,8 @@ export const queryRagInAI = async ({
   question,
   knowledgeBaseId,
   conversationId = null,
+  conversation_history = [],
+  enable_query_understanding = undefined,
   top_k = undefined,
   similarity_threshold = undefined,
   user,
@@ -191,6 +193,12 @@ export const queryRagInAI = async ({
     knowledgeBaseId,
   };
   if (conversationId) payload.conversationId = conversationId;
+  if (Array.isArray(conversation_history) && conversation_history.length > 0) {
+    payload.conversation_history = conversation_history;
+  }
+  if (enable_query_understanding !== undefined) {
+    payload.enable_query_understanding = enable_query_understanding;
+  }
   if (top_k !== undefined) payload.top_k = top_k;
   if (similarity_threshold !== undefined) payload.similarity_threshold = similarity_threshold;
 
@@ -214,6 +222,55 @@ export const queryRagInAI = async ({
         : status
           ? `AI RAG service error: ${safeMsg}`
           : 'AI service is currently unavailable. Please ensure the AI service is running and try again.'
+    );
+    err.statusCode = status && status >= 400 && status < 500 ? status : status ? 502 : 503;
+    throw err;
+  }
+};
+
+/**
+ * Analyze and rewrite a query using the Python Phase 4 Query Understanding endpoint.
+ */
+export const analyzeQueryInAI = async ({
+  question,
+  knowledgeBaseId = null,
+  knowledge_base_name = null,
+  conversationId = null,
+  conversation_history = [],
+  user,
+  organizationId = null,
+}) => {
+  const apiKey = getServiceApiKey();
+  const userContextToken = createUserContextToken(user, organizationId);
+
+  const payload = { question };
+  if (knowledgeBaseId) payload.knowledgeBaseId = knowledgeBaseId;
+  if (knowledge_base_name) payload.knowledge_base_name = knowledge_base_name;
+  if (conversationId) payload.conversationId = conversationId;
+  if (Array.isArray(conversation_history) && conversation_history.length > 0) {
+    payload.conversation_history = conversation_history;
+  }
+
+  try {
+    const response = await ragClient.post('/analyze-query', payload, {
+      headers: {
+        'x-api-key': apiKey,
+        'x-user-context-token': userContextToken,
+      },
+    });
+    return response.data;
+  } catch (error) {
+    const status = error.response?.status;
+    const rawDetail = error.response?.data?.detail || error.response?.data?.message || error.message;
+    const safeMsg = sanitizeUpstreamMessage(rawDetail);
+    console.error(`Query analysis via AI service failed (${status || 'network'}): ${safeMsg}`);
+
+    const err = new Error(
+      status && status >= 400 && status < 500
+        ? safeMsg
+        : status
+          ? `AI Query Understanding service error: ${safeMsg}`
+          : 'AI service is currently unavailable.'
     );
     err.statusCode = status && status >= 400 && status < 500 ? status : status ? 502 : 503;
     throw err;
