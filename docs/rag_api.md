@@ -32,6 +32,8 @@ The Enterprise Knowledge Intelligence Platform provides a dedicated, high-perfor
 | `question` | `string` | **Yes** | — | User's question or search query (must be non-empty, min length 1, max length 4000). |
 | `knowledgeBaseId` | `string` | **Yes** | — | Target knowledge base identifier to query within. |
 | `conversationId` | `string` | Optional | `None` | Optional client or session conversation tracker for logging or multi-turn reference. |
+| `conversation_history` | `array` | Optional | `[]` | Optional bounded list of prior turns (`{ "role": "user" \| "assistant", "content": "..." }`) used to resolve follow-up questions (automatically forwarded by Node.js when continuing a `conversationId`). |
+| `enable_query_understanding` | `boolean` | Optional | `True` | Optional override for Phase 4 query analysis, rewriting, and multi-query fusion. |
 | `top_k` | `integer` | Optional | `5` | Maximum number of chunks to feed into the generation prompt (1 to 20). |
 | `similarity_threshold` | `float` | Optional | `0.65` | Minimum cosine similarity score (0.0 to 1.0) required for a chunk to be considered evidence. |
 
@@ -176,11 +178,40 @@ Set the following environment variables in `ai-service/.env`:
 | `RAG_TEMPERATURE` | `0.0` | Sampling temperature (0.0 for maximum determinism). |
 | `RAG_MAX_OUTPUT_TOKENS` | `2048` | Maximum tokens in the generated response. |
 | `RAG_GENERATION_TIMEOUT` | `30.0` | Timeout in seconds for LLM generation API calls. |
+| `QUERY_UNDERSTANDING_ENABLED` | `true` | Enable/disable Phase 4 query analysis and rewriting inside `/api/rag/query`. |
+| `QUERY_UNDERSTANDING_MODEL` | `null` | Optional model override for query understanding (falls back to `GEMINI_GENERATION_MODEL`). |
+| `QUERY_UNDERSTANDING_TIMEOUT` | `15.0` | Timeout in seconds for Gemini query analysis calls. |
+| `QUERY_UNDERSTANDING_MAX_TOKENS` | `768` | Max JSON tokens for structured query understanding output. |
+| `QUERY_MAX_ALTERNATIVE_QUERIES` | `3` | Maximum alternative search queries generated per query. |
+| `QUERY_MAX_SUB_QUERIES` | `4` | Maximum decomposed sub-questions for multi-part queries. |
+| `QUERY_MAX_HISTORY_TURNS` | `6` | Maximum conversation turns forwarded for follow-up resolution. |
 | `AI_SERVICE_API_KEY` | `dev_internal_ai_secret_key_change_in_production` | Internal service auth key. |
 
 ---
 
-## 6. Testing & Usage Examples
+## 6. Phase 4 Query Understanding & Rewriting (`POST /api/rag/analyze-query`)
+
+Both Node.js and the protected Python AI Service expose a standalone endpoint to inspect query understanding without generating an answer:
+
+- **Endpoint:** `POST /api/rag/analyze-query`
+- **Request:**
+  ```json
+  {
+    "question": "And how often does it apply?",
+    "knowledgeBaseId": "65b91a24e2c81d0012345678",
+    "conversationId": "conv_abc123"
+  }
+  ```
+- **Response (`QueryUnderstandingResult`):**
+  - `original_question`: Always preserved untouched for downstream answer generation.
+  - `analysis`: `intent` (`factual_lookup`, `procedural`, `comparison`, `summarization`, `multi_part`, `follow_up`, `ambiguous`, `out_of_scope`), `keywords`, `entities`, `is_ambiguous`, `ambiguity_reason`, `clarification_needed`, `suggested_clarifications`, `is_multi_part`, `sub_questions`, `is_follow_up`, `requires_context_resolution`, `is_clear_standalone`.
+  - `rewrite`: `primary_retrieval_query` (kept identical to `original_question` when already clear), `alternative_queries`, `sub_queries`, `was_rewritten`, `rewrite_strategy` (`unchanged` | `contextualized` | `clarified` | `decomposed` | `expanded`).
+  - `retrieval_queries`: Deduplicated queries sent to embedding and Qdrant vector retrieval.
+  - **Safeguards:** Never generates answers, suppresses internal chain-of-thought (`thinking_budget=0` and no reasoning schema fields), enforces KB and conversation ownership before loading context, and falls back deterministically (`fallback_used=true`) if Gemini is unavailable.
+
+---
+
+## 7. Testing & Usage Examples
 
 ### Example: Calling via cURL
 

@@ -593,5 +593,114 @@ describe('Node.js RAG Gateway, RBAC & Conversation History APIs', () => {
       expect(res.statusCode).toBe(403);
       expect(res.body.message).toMatch(/Not authorized/i);
     });
+
+    it('forwards bounded conversation_history on follow-up RAG queries and supports /api/rag/analyze-query', async () => {
+      mockAuthUser(engUser);
+      const token = signJwt(engUserId);
+
+      jest.spyOn(KnowledgeBase, 'findById').mockResolvedValue({
+        _id: kbId,
+        name: 'Engineering KB',
+        owner: ownerId,
+        visibility: 'organization',
+        organization: 'org_acme',
+        status: 'active',
+      });
+
+      const existingConv = {
+        _id: convId,
+        user: engUserId,
+        knowledgeBase: kbId,
+        messages: [
+          { role: 'user', content: 'What TLS version is required?' },
+          { role: 'assistant', content: 'TLS 1.3 is required.' },
+        ],
+        save: jest.fn().mockResolvedValue(true),
+      };
+      jest.spyOn(Conversation, 'findById').mockResolvedValue(existingConv);
+      jest.spyOn(Document, 'find').mockResolvedValue([
+        {
+          _id: publicDocId,
+          title: 'Arch Spec',
+          originalFileName: 'arch.pdf',
+          uploadedBy: ownerId,
+          visibility: 'public',
+          indexingStatus: 'indexed',
+        },
+      ]);
+
+      const postSpy = jest.spyOn(ragClient, 'post').mockResolvedValue({
+        data: {
+          answer: 'Cipher suites must use AEAD GCM [Evidence 1].',
+          citations: [],
+          metadata: {
+            knowledge_base_id: kbId.toString(),
+            chunks_retrieved: 1,
+            chunks_used: 1,
+            model: 'gemini-2.5-flash',
+            similarity_threshold: 0.65,
+            insufficient_evidence: false,
+            query_understanding: {
+              intent: 'follow_up',
+              was_rewritten: true,
+              rewrite_strategy: 'contextualized',
+              original_question: 'Which cipher suites does it require?',
+              primary_retrieval_query: 'Which cipher suites does TLS 1.3 require?',
+              retrieval_queries_used: ['Which cipher suites does TLS 1.3 require?'],
+            },
+          },
+          conversationId: convId.toString(),
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/rag/query')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          question: 'Which cipher suites does it require?',
+          knowledgeBaseId: kbId.toString(),
+          conversationId: convId.toString(),
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(postSpy.mock.calls[0][1].conversation_history).toEqual([
+        { role: 'user', content: 'What TLS version is required?' },
+        { role: 'assistant', content: 'TLS 1.3 is required.' },
+      ]);
+      expect(res.body.data.metadata.query_understanding.intent).toBe('follow_up');
+
+      // Test standalone /api/rag/analyze-query endpoint with RBAC
+      postSpy.mockResolvedValueOnce({
+        data: {
+          original_question: 'Which cipher suites does it require?',
+          analysis: { intent: 'follow_up', is_follow_up: true, keywords: ['cipher', 'suites'], entities: ['TLS 1.3'] },
+          rewrite: {
+            original_question: 'Which cipher suites does it require?',
+            primary_retrieval_query: 'Which cipher suites does TLS 1.3 require?',
+            alternative_queries: [],
+            sub_queries: [],
+            was_rewritten: true,
+            rewrite_strategy: 'contextualized',
+          },
+          retrieval_queries: ['Which cipher suites does TLS 1.3 require?'],
+          used_conversation_context: true,
+          fallback_used: false,
+          model: 'gemini-2.5-flash',
+        },
+      });
+
+      const analyzeRes = await request(app)
+        .post('/api/rag/analyze-query')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          question: 'Which cipher suites does it require?',
+          knowledgeBaseId: kbId.toString(),
+          conversationId: convId.toString(),
+        });
+
+      expect(analyzeRes.statusCode).toBe(200);
+      expect(analyzeRes.body.data.original_question).toBe('Which cipher suites does it require?');
+      expect(analyzeRes.body.data.used_conversation_context).toBe(true);
+    });
   });
 });

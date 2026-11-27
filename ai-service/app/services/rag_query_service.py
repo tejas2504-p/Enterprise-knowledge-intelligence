@@ -6,6 +6,11 @@ from bson import ObjectId
 from fastapi import HTTPException, status
 
 from app.core.config import settings
+from app.models.query_understanding import (
+    QueryUnderstandingRequest,
+    QueryUnderstandingResult,
+    QueryUnderstandingSummary,
+)
 from app.models.rag import Citation, RagQueryRequest, RagQueryResponse, RagRetrievalMetadata
 from app.prompts.rag_prompts import INSUFFICIENT_EVIDENCE_RESPONSE
 from app.services.embedding_service import (
@@ -21,6 +26,7 @@ from app.services.generation_service import (
     GenerationTimeoutError,
     gemini_generation_service,
 )
+from app.services.query_understanding import query_understanding_service
 from app.services.vector_store import (
     IncompatibleVectorDimensionError,
     InvalidVectorError,
@@ -70,10 +76,38 @@ class RagQueryService:
         vector_store=None,
         embedding_service=None,
         generation_service=None,
+        query_understanding=None,
     ):
         self.vector_store = vector_store or vector_store_service
         self.embedding_service = embedding_service or gemini_embedding_service
         self.generation_service = generation_service or gemini_generation_service
+        self.query_understanding = query_understanding or query_understanding_service
+
+    @staticmethod
+    def _build_qu_summary(
+        qu_result: Optional[QueryUnderstandingResult],
+    ) -> Optional[QueryUnderstandingSummary]:
+        if qu_result is None:
+            return None
+        return QueryUnderstandingSummary(
+            intent=qu_result.analysis.intent,
+            keywords=qu_result.analysis.keywords,
+            entities=qu_result.analysis.entities,
+            is_ambiguous=qu_result.analysis.is_ambiguous,
+            clarification_needed=qu_result.analysis.clarification_needed,
+            suggested_clarifications=qu_result.analysis.suggested_clarifications,
+            is_multi_part=qu_result.analysis.is_multi_part,
+            is_follow_up=qu_result.analysis.is_follow_up,
+            was_rewritten=qu_result.rewrite.was_rewritten,
+            rewrite_strategy=qu_result.rewrite.rewrite_strategy,
+            original_question=qu_result.original_question,
+            primary_retrieval_query=qu_result.rewrite.primary_retrieval_query,
+            alternative_queries=qu_result.rewrite.alternative_queries,
+            sub_queries=qu_result.rewrite.sub_queries,
+            retrieval_queries_used=qu_result.retrieval_queries,
+            used_conversation_context=qu_result.used_conversation_context,
+            fallback_used=qu_result.fallback_used,
+        )
 
     async def verify_kb_access(
         self,
@@ -318,6 +352,32 @@ class RagQueryService:
             else getattr(settings, "RAG_SIMILARITY_THRESHOLD", 0.65)
         )
 
+        # 2b. Phase 4 Query Understanding & Rewriting (non-answering, preserves original question)
+        use_qu = (
+            request.enable_query_understanding
+            if request.enable_query_understanding is not None
+            else getattr(settings, "QUERY_UNDERSTANDING_ENABLED", True)
+        )
+        qu_result: Optional[QueryUnderstandingResult] = None
+        retrieval_queries: list[str] = [clean_question]
+        if use_qu:
+            qu_result = await self.query_understanding.process_query(
+                QueryUnderstandingRequest(
+                    question=clean_question,
+                    conversation_history=request.conversation_history,
+                    conversationId=request.conversationId,
+                    knowledgeBaseId=clean_kb_id,
+                    knowledge_base_name=kb_context.get("title") or None,
+                ),
+                db=db,
+                user_id=user_id,
+                user_role=user_role,
+                fallback_on_error=True,
+            )
+            if qu_result.retrieval_queries:
+                retrieval_queries = qu_result.retrieval_queries
+        qu_summary = self._build_qu_summary(qu_result)
+
         # If DB verified 0 readable indexed documents, skip Qdrant and Gemini calls cleanly
         if allowed_doc_ids is not None and len(allowed_doc_ids) == 0:
             logger.info(
@@ -337,19 +397,20 @@ class RagQueryService:
                     insufficient_evidence=True,
                     no_indexed_documents=True,
                     indexed_documents=doc_stats.get("indexed_documents", 0),
+                    query_understanding=qu_summary,
                 ),
                 conversationId=request.conversationId,
             )
 
-        # 3. Generate Query Embedding
+        # 3. Generate Query Embedding(s)
         try:
             embed_resp = self.embedding_service.embed_texts(
-                texts=[clean_question],
+                texts=retrieval_queries,
                 task_type="RETRIEVAL_QUERY",
             )
             if not embed_resp.embeddings:
                 raise EmbeddingValidationError("Embedding service returned empty query vector")
-            query_vector = embed_resp.embeddings[0]
+            query_vectors = list(embed_resp.embeddings)
         except EmbeddingRateLimitError as e:
             safe_err = sanitize_error_message(e)
             logger.error("Embedding rate limit exceeded: %s", safe_err)
@@ -384,18 +445,26 @@ class RagQueryService:
                 detail=f"Failed to generate query embedding: {safe_err}",
             ) from e
 
-        # 4 & 5. Search Qdrant with Mandatory Access-Control Filters
-        search_kwargs: dict[str, Any] = {
-            "query_vector": query_vector,
-            "knowledge_base_ids": [clean_kb_id],
-            "organization_id": verified_org_id,
-            "limit": top_k * 2,  # Over-fetch slightly before threshold filtering
-        }
-        if allowed_doc_ids is not None:
-            search_kwargs["document_ids"] = allowed_doc_ids
-
+        # 4 & 5. Search Qdrant with Mandatory Access-Control Filters (fusing multi-query hits)
+        merged_hits: dict[str, VectorSearchResult] = {}
         try:
-            search_hits: list[VectorSearchResult] = self.vector_store.search(**search_kwargs)
+            for q_vec in query_vectors:
+                search_kwargs: dict[str, Any] = {
+                    "query_vector": q_vec,
+                    "knowledge_base_ids": [clean_kb_id],
+                    "organization_id": verified_org_id,
+                    "limit": top_k * 2,  # Over-fetch slightly before threshold filtering
+                }
+                if allowed_doc_ids is not None:
+                    search_kwargs["document_ids"] = allowed_doc_ids
+
+                hits: list[VectorSearchResult] = self.vector_store.search(**search_kwargs)
+                for hit in hits:
+                    hit_key = hit.point_id or f"{hit.document_id}:{hit.chunk_id or hit.chunk_index}"
+                    existing = merged_hits.get(hit_key)
+                    if existing is None or hit.score > existing.score:
+                        merged_hits[hit_key] = hit
+            search_hits = sorted(merged_hits.values(), key=lambda h: h.score, reverse=True)
         except VectorStoreConnectionError as e:
             safe_err = sanitize_error_message(e)
             logger.error("Vector store unavailable during search: %s", safe_err)
@@ -451,6 +520,7 @@ class RagQueryService:
                     insufficient_evidence=True,
                     no_indexed_documents=doc_stats.get("no_indexed_documents", False),
                     indexed_documents=doc_stats.get("indexed_documents"),
+                    query_understanding=qu_summary,
                 ),
                 conversationId=request.conversationId,
             )
@@ -521,6 +591,7 @@ class RagQueryService:
                     insufficient_evidence=True,
                     no_indexed_documents=False,
                     indexed_documents=doc_stats.get("indexed_documents"),
+                    query_understanding=qu_summary,
                 ),
                 conversationId=request.conversationId,
             )
@@ -562,13 +633,17 @@ class RagQueryService:
             else:
                 cited_chunks = surviving_chunks
 
+            excerpt_query = clean_question
+            if qu_result and qu_result.analysis.keywords:
+                excerpt_query = f"{clean_question} {' '.join(qu_result.analysis.keywords)}"
+
             citations = [
                 Citation(
                     document_id=c.document_id,
                     filename=c.filename,
                     chunk_id=c.chunk_id,
                     page_number=c.page_number,
-                    excerpt=extract_relevant_excerpt(c.text, clean_question),
+                    excerpt=extract_relevant_excerpt(c.text, excerpt_query),
                     score=round(c.score, 4),
                 )
                 for c in cited_chunks
@@ -586,6 +661,7 @@ class RagQueryService:
                 insufficient_evidence=is_insufficient,
                 no_indexed_documents=False,
                 indexed_documents=doc_stats.get("indexed_documents"),
+                query_understanding=qu_summary,
             ),
             conversationId=request.conversationId,
         )

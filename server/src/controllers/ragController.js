@@ -16,6 +16,23 @@ const fetchKBDocuments = async (kbId) => {
   return Array.isArray(result) ? result : [];
 };
 
+const extractConversationHistory = (conversation, maxTurns = 6) => {
+  const rawHistory = Array.isArray(conversation?.messages)
+    ? conversation.messages.slice(-maxTurns)
+    : [];
+  return rawHistory
+    .filter(
+      (m) =>
+        (m.role === 'user' || m.role === 'assistant') &&
+        typeof m.content === 'string' &&
+        m.content.trim().length > 0
+    )
+    .map((m) => ({
+      role: m.role,
+      content: m.content.trim().slice(0, 1500),
+    }));
+};
+
 /**
  * Normalize incoming RAG query body supporting both canonical (/api/rag/query)
  * and legacy (/api/chat) request shapes without accepting client-supplied user identity.
@@ -152,20 +169,7 @@ export const queryRag = async (req, res, next) => {
     ).length;
 
     // 4. Collect bounded recent conversation turns for follow-up query resolution
-    const rawHistory = Array.isArray(conversation?.messages)
-      ? conversation.messages.slice(-6)
-      : [];
-    const conversationHistory = rawHistory
-      .filter(
-        (m) =>
-          (m.role === 'user' || m.role === 'assistant') &&
-          typeof m.content === 'string' &&
-          m.content.trim().length > 0
-      )
-      .map((m) => ({
-        role: m.role,
-        content: m.content.trim().slice(0, 1500),
-      }));
+    const conversationHistory = extractConversationHistory(conversation);
 
     // 5. Call protected Python AI Service with verified server-signed user identity
     const aiResponse = await queryRagInAI({
@@ -272,6 +276,99 @@ export const queryRag = async (req, res, next) => {
         metadata: enrichedMetadata,
         conversationId: persistedConversationId || aiResponse?.conversationId || null,
       },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      res.status(error.statusCode);
+    }
+    next(error);
+  }
+};
+
+// @desc    Analyze and optimize a query using Python Phase 4 Query Understanding service
+// @route   POST /api/rag/analyze-query
+// @access  Private
+export const analyzeQuery = async (req, res, next) => {
+  try {
+    const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+    const knowledgeBaseId =
+      typeof req.body?.knowledgeBaseId === 'string' ? req.body.knowledgeBaseId.trim() : null;
+    const conversationId = req.body?.conversationId || null;
+
+    if (!question) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Question is required and cannot be empty',
+      });
+    }
+
+    if (question.length > 4000) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Question cannot exceed 4000 characters',
+      });
+    }
+
+    let kb = null;
+    if (knowledgeBaseId) {
+      if (!mongoose.Types.ObjectId.isValid(knowledgeBaseId)) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid knowledgeBaseId format',
+        });
+      }
+      kb = await KnowledgeBase.findById(knowledgeBaseId);
+      if (!kb) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'Knowledge Base not found',
+        });
+      }
+      if (!canUserViewKB(req.user, kb)) {
+        return res.status(403).json({
+          status: 'fail',
+          message: 'Not authorized to access this Knowledge Base',
+        });
+      }
+    }
+
+    let conversationHistory = [];
+    if (conversationId) {
+      if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+        return res.status(400).json({
+          status: 'fail',
+          message: 'Invalid conversationId format',
+        });
+      }
+      const conversation = await Conversation.findById(conversationId);
+      if (!conversation) {
+        return res.status(404).json({
+          status: 'fail',
+          message: 'Conversation not found',
+        });
+      }
+      if (conversation.user.toString() !== req.user._id.toString()) {
+        return res.status(403).json({
+          status: 'fail',
+          message: 'Not authorized to access this conversation',
+        });
+      }
+      conversationHistory = extractConversationHistory(conversation);
+    }
+
+    const analysisResult = await analyzeQueryInAI({
+      question,
+      knowledgeBaseId: kb ? kb._id.toString() : null,
+      knowledge_base_name: kb?.name || null,
+      conversationId,
+      conversation_history: conversationHistory,
+      user: req.user,
+      organizationId: kb?.organization || req.user.organization || null,
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: analysisResult,
     });
   } catch (error) {
     if (error.statusCode) {
